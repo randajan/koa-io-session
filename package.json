@@ -1,0 +1,50 @@
+{
+  "name": "@randajan/koa-io-session",
+  "version": "0.0.1",
+  "description": "Simple bridge between koa-session and socket.io. Shares a unified session across HTTP and WebSocket using a common session store.",
+  "repository": "randajan/koa-io-session",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.mjs",
+      "require": "./dist/cjs/index.cjs"
+    }
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@randajan/simple-lib": "^3.2.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "koa",
+    "socket.io",
+    "session",
+    "koa-session",
+    "websocket",
+    "shared-session",
+    "middleware",
+    "bridge",
+    "auth",
+    "realtime"
+  ],
+  "homepage": "https://github.com/randajan/koa-io-session",
+  "bugs": {
+    "url": "https://github.com/randajan/koa-io-session/issues"
+  },
+  "author": {
+    "name": "Jan Randa",
+    "email": "jnranda@gmail.com",
+    "url": "https://www.linkedin.com/in/randajan/"
+  },
+  "dependencies": {
+    "@randajan/props": "^0.1.4",
+    "crypto": "^1.0.1",
+    "koa-session": "^7.0.2"
+  }
+}
