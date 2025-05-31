@@ -34,6 +34,8 @@ export const attachSession = (app, io, opt = {}) => {
     
         await next();
     });
+
+    return opt.store;
 };
 
 

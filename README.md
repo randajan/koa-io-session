@@ -26,7 +26,7 @@ const app = new Koa();
 const server = http.createServer(app.callback());
 const io = new Server(server);
 
-attachSession(app, io, {
+const store = attachSession(app, io, {
   key: "koa:sess",
   signed: true,
   maxAge: 86400000
