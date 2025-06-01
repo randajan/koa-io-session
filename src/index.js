@@ -4,6 +4,7 @@ import { generateUid } from "./uid";
 
 
 export default attachSession;
+
 export {
     attachSession,
     generateUid,
