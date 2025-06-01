@@ -2,6 +2,7 @@
 import session from "koa-session";
 import { solid } from "@randajan/props";
 import { generateUid } from "./uid";
+import { SessionStore } from "./SessionStore";
 
 
 export const attachSession = (app, io, opt = {}) => {
@@ -11,8 +12,10 @@ export const attachSession = (app, io, opt = {}) => {
 
     if (!app.keys) app.keys = Array(6).fill().map(() => generateUid(12));
     if (!opt.key) opt.key = generateUid(12);
+    if (!opt.maxAge) { opt.maxAge = 86_400_000; }
+    if (!opt.store) { opt.store = new SessionStore(opt.maxAge); }
 
-    const { key } = opt;
+    const { key, store } = opt;
 
     const koaSession = session(opt, app);
     app.use(koaSession);
@@ -32,7 +35,6 @@ export const attachSession = (app, io, opt = {}) => {
         await koaSession(ctx, async () => { });            // aktivuj koa-session
 
         const sid = ctx.cookies.get(key, { signed });
-        const store = koaSession.store;                   // Memory, Redis, cokoliv
         const ttl = () => ctx.session?.cookie?.maxAge ?? opt.maxAge ?? 86_400_000;    // helper pro TTL
 
         const persist = () => store.set(sid, ctx.session, ttl());
