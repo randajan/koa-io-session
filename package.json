@@ -1,6 +1,6 @@
 {
   "name": "@randajan/koa-io-session",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Simple bridge between koa-session and socket.io. Shares a unified session across HTTP and WebSocket using a common session store.",
   "repository": "randajan/koa-io-session",
   "type": "module",
