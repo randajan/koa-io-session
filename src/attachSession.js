@@ -22,7 +22,7 @@ export const attachSession = (app, io, opt = {}) => {
 
     // pro HTTP jen sessionId, nic víc nepotřebujeme
     app.use(async (ctx, next) => {
-        ctx.session = true;
+        ctx.session.active = true;
         solid(ctx, "sessionId", ctx.cookies.get(key, { signed }));
         await next();
     });
