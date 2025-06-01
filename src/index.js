@@ -1,4 +1,4 @@
-import attachSession from "./attachSession";
+import { attachSession } from "./attachSession";
 import { SessionStore } from "./SessionStore";
 import { generateUid } from "./uid";
 
