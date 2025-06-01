@@ -47,6 +47,18 @@ io.on("connection", socket => {
 
 ---
 
+## Production notes
+
+- **Stable signing keys**: Provide your own `app.keys` and a fixed `opt.key` (cookie name).
+  Using randomly generated values on every server restart will invalidate existing signed cookies and force users to log in again.
+- **Persistent stores for production**: The bundled in‑memory store works only for local development because all sessions disappear when the process restarts.
+  Configure a persistent store such as Redis, DynamoDB, or SQL for real deployments.
+- **Proxy deep‑mutation limitation**: The session proxy tracks changes only on top‑level properties.
+  If you mutate nested objects you must either replace the whole object or use immutable updates so that changes are picked up and persisted.
+- **Middleware order matters**: Call `attachSession` *before* any middleware (Router, authentication, etc.) that expects `ctx.session` to exist.
+
+
+
 ## License
 
 MIT © [randajan](https://github.com/randajan)
