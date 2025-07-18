@@ -1,6 +1,6 @@
 // attachSession.js  – verze s auto-persist proxy
 import session from "koa-session";
-import { solid } from "@randajan/props";
+import { solid, virtual } from "@randajan/props";
 import { generateUid } from "./uid";
 import { SessionStore } from "./SessionStore";
 
@@ -36,28 +36,9 @@ export const attachSession = (app, io, opt = {}) => {
         await koaSession(ctx, async () => { });            // aktivuj koa-session
 
         const sid = ctx.cookies.get(key, { signed });
-        const ttl = () => ctx.session?.cookie?.maxAge ?? opt.maxAge ?? 86_400_000;    // helper pro TTL
-
-        const persist = () => store.set(sid, ctx.session, ttl());
-
-        /* AUTO-SAVE PROXY  */
-        const liveSession = new Proxy(ctx.session, {
-            set(target, prop, value, receiver) {
-                const ok = Reflect.set(target, prop, value, receiver);
-                persist();           // hned uložíme
-                return ok;
-            },
-            deleteProperty(target, prop) {
-                const ok = Reflect.deleteProperty(target, prop);
-                persist();
-                return ok;
-            }
-        });
-
-        socket.once("disconnect", persist);
 
         solid(socket, "sessionId", sid);
-        solid(socket, "session", liveSession);     // <-- už se ukládá samo
+        virtual(socket, "session", _=>store.get(sid));     // <-- už se ukládá samo
 
         await next();
     });
