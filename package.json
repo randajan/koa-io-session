@@ -14,7 +14,10 @@
   },
   "license": "MIT",
   "devDependencies": {
-    "@randajan/simple-lib": "^3.2.0"
+    "@randajan/simple-lib": "^3.2.0",
+    "koa": "^3.1.2",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
   },
   "files": [
     "dist",
@@ -44,6 +47,7 @@
   },
   "dependencies": {
     "@randajan/props": "^0.1.4",
+    "@randajan/queue": "^1.0.0",
     "crypto": "^1.0.1",
     "koa-session": "^7.0.2"
   }

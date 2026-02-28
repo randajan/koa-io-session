@@ -1,48 +1,92 @@
 import { solid } from "@randajan/props";
+import { EventEmitter } from "events";
 
-export class SessionStore {
-    constructor(defaultTTL=86_400_000) {
-        solid(this, "_data", new Map());
-        solid(this, "_defaultTTL", defaultTTL);
+
+
+export const wrapStore = (store)=>{
+    return {
+        get:store.get.bind(store),
+        set:store.set.bind(store),
+        destroy:store.destroy.bind(store),
+        touch:store.touch.bind(store)
+    }
+}
+
+const formatState = (session, maxAge, prevTTL, defaultTTL)=>{
+    const ttl = maxAge ?? prevTTL ?? defaultTTL;
+    const expiresAt = Date.now() + ttl;
+    return { session, expiresAt, ttl };
+}
+
+export class SessionStore extends Map {
+
+    constructor(defaultTTL=86_400_000, eventEmitterOpt={}) {
+        super();
+        solid(this, "defaultTTL", defaultTTL);
+        solid(this, "event", new EventEmitter(eventEmitterOpt));
+    }
+
+    on(eventName, callback) {
+        return this.event.on(eventName, callback);
     }
 
     get(sid) {
-        const d = this._data.get(sid);
-        if (!d) return;
+        const d = super.get(sid);
+        if (!d) { return; }
         if (Date.now() < d.expiresAt) { return d.session; }
-        this.destroy(sid);
-        return {};
+        this.delete(sid);
+    }
+
+    touch(sid, maxAge) {
+        const { defaultTTL } = this;
+        const d = super.get(sid);
+        if (!d) { return false; }
+        super.set(sid, formatState(d.session, maxAge, d.ttl, defaultTTL));
+        this.event.emit("touch", this, sid);
+        return true;
     }
 
     set(sid, session, maxAge) {
-        const { _data, _defaultTTL } = this;
-        const d = _data.get(sid);
-        const ttl = maxAge ?? d?.ttl ?? _defaultTTL;
-        const expiresAt = Date.now() + ttl;
-        _data.set(sid, { session, expiresAt, ttl });
+        const { defaultTTL } = this;
+        const d = super.get(sid);
+        if (session == null) { return !d || this.destroy(sid); }
+        super.set(sid, formatState(session, maxAge, d?.ttl, defaultTTL));
+        this.event.emit("set", this, sid, !d);
+        return true;
     }
 
-    destroy(sid) { this._data.delete(sid); }
+    delete(sid) {
+        return this.destroy(sid);
+    }
+
+    destroy(sid) {
+        if (this.has(sid)) {
+            super.delete(sid);
+            this.event.emit("destroy", this, sid);
+        }
+        return true;
+    }
 
     cleanup() {
-        const { _data } = this;
-
         const now = Date.now();
         let cleared = 0;
 
-        for (const [sid, d] of _data) {
+        for (const [sid, d] of this.entries()) {
             if (now < d.expiresAt) { continue; }
-            _data.delete(sid);
-            cleared++;
+            if (this.destroy(sid)) { cleared++; }
         }
+
+        if (cleared) { this.event.emit("cleanup", this, cleared); }
 
         return cleared;
     }
 
-    autoCleanup(interval=3_600_000, onCleanup=()=>{}) {
+    autoCleanup(interval) {
+        const { defaultTTL } = this;
+        if (!interval) { interval = defaultTTL/10; }
+
         const tid = setInterval(() => {
-            const cleared = this.cleanup();
-            if (cleared) { onCleanup(cleared); }
+            this.cleanup();
         }, interval);
         return _ => clearInterval(tid);
     }
