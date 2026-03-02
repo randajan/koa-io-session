@@ -1,10 +1,8 @@
 import { solids } from "@randajan/props";
-import { createQueue } from "@randajan/queue";
-import { valid } from "./tools.js";
+import { validObject } from "./tools.js";
 
 
 const sidLocks = new Map();
-const touchQueues = new Map();
 
 const createSessionCtx = (sessionId, session, socket) =>solids({ session }, { sessionId, socket });
 
@@ -36,36 +34,9 @@ const withLock = async (task, socket, ...args) => {
     }
 };
 
-const getTouchQueue = (sid, store) => {
-    const existing = touchQueues.get(sid);
-    if (existing) { return existing; }
-
-    const queue = createQueue(async (touchMaxAge) => {
-        try { await store.touch(sid, touchMaxAge); } catch {}
-        if (!queue.isPending) { touchQueues.delete(sid); }
-    }, { pass: "last", softMs:1_000, hardMs:5_000 });
-
-    touchQueues.set(sid, queue);
-    return queue;
-};
-
-const scheduleTouch = (sid, store, maxAge) => {
-    if (typeof store?.touch !== "function") { return; }
-    const queue = getTouchQueue(sid, store);
-    queue(maxAge);
-};
-
-export const clearTouchQueue = (sid) => {
-    const queue = touchQueues.get(sid);
-    if (!queue) { return false; }
-    queue.flush();
-    touchQueues.delete(sid);
-    return true;
-};
-
-const runSessionHandler = async (socket, handler, opt={}) => {
+const runSessionHandler = async (socket, handler, store) => {
     const sid = socket.sessionId;
-    const { store, maxAge } = opt;
+
     const current = await store.get(sid);
 
     if (!current) { throw new Error("Session not found"); }
@@ -77,7 +48,6 @@ const runSessionHandler = async (socket, handler, opt={}) => {
     const result = await handler(sessionCtx, socket);
 
     if (sessionCtx.session == null) {
-        clearTouchQueue(sid);
         await store.destroy(sid);
         return result;
     }
@@ -85,16 +55,13 @@ const runSessionHandler = async (socket, handler, opt={}) => {
     sessionCtx.session = validObject(sessionCtx.session, false, "session");
 
     if (isSessionHashChanged(originalHash, sessionCtx.session)) {
-        clearTouchQueue(sid);
-        await store.set(sid, sessionCtx.session, maxAge);
-    } else {
-        scheduleTouch(sid, store, maxAge);
+        await store.set(sid, sessionCtx.session);
     }
 
     return result;
 };
 
-export const applySessionHandler = async (socket, handler, opt={}) => {
+export const applySessionHandler = async (socket, handler, store) => {
 
     if (typeof handler !== "function") {
         throw new TypeError("socket.withSession(handler) requires a function");
@@ -103,5 +70,5 @@ export const applySessionHandler = async (socket, handler, opt={}) => {
         throw new Error("Missing session id");
     }
 
-    return withLock(runSessionHandler, socket, handler, opt);
+    return withLock(runSessionHandler, socket, handler, store);
 };

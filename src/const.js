@@ -10,11 +10,9 @@ export const ms = {
 
 export const _customOptKeys = new Set([
     "store",
-    "cleanupInterval",
+    "autoCleanup",
+    "autoCleanupMs",
     "clientKey",
     "clientMaxAge",
-    "clientAlwaysRoll",
-    "socketTouch",
-    "socketTouchSoftMs",
-    "socketTouchHardMs"
+    "clientAlwaysRoll"
 ]);

@@ -4,8 +4,8 @@
   "description": "Simple bridge between koa-session and socket.io. Shares a unified session across HTTP and WebSocket using a common session store.",
   "repository": "randajan/koa-io-session",
   "type": "module",
-  "main": "dist/index.js",
-  "module": "dist/index.js",
+  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/esm/index.mjs",
   "exports": {
     ".": {
       "import": "./dist/esm/index.mjs",
@@ -47,7 +47,6 @@
   },
   "dependencies": {
     "@randajan/props": "^0.1.4",
-    "@randajan/queue": "^1.0.0",
     "crypto": "^1.0.1",
     "koa-session": "^7.0.2"
   }

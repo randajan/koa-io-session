@@ -3,11 +3,11 @@ import { wrapExternalKey } from "./wrappers.js";
 
 
 export const createClientCookie = opt => {
-    const { key, signed, path, secure, sameSite, httpOnly } = opt;
+    const { key, maxAge, signed, path, secure, sameSite, httpOnly } = opt;
     return wrapExternalKey({
-        key: `${key}.cid`,
+        key,
         signed,
-        maxAge: 365 * 24 * 60 * 60 * 1000,
+        maxAge,
         path: path ?? "/",
         secure,
         sameSite,

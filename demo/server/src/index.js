@@ -2,7 +2,7 @@ import { info } from "@randajan/simple-lib/node";
 import Koa from "koa";
 import { createServer as createHttpServer } from "http";
 import { Server as SocketServer } from "socket.io";
-import { attachSession } from "../../../src/index.js";
+import { bridgeSession } from "../../../src/index.js";
 
 
 const port = info.port + 1;
@@ -17,7 +17,7 @@ const io = new SocketServer(http, {
     }
 });
 
-const store = attachSession(app, io, {
+const bridge = bridgeSession(app, io, {
     key: "koa.io.demo.sid",
     signed: true,
     maxAge: 1000 * 10,
@@ -26,7 +26,8 @@ const store = attachSession(app, io, {
     httpOnly: true
 });
 
-store.autoCleanup();
+bridge.on("sessionStart", opt=>{ console.log("sessionStart", opt, "\n"); })
+bridge.on("sessionEnd", opt=>{ console.log("sessionEnd", opt, "\n"); })
 
 
 const readSession = (session = {}) => ({
@@ -49,21 +50,30 @@ const formatWsError = (source, error) => ({
     error: error?.message || String(error)
 });
 
+const createWsPayload = (socket, from, sessionCtx) => ({
+    ok: true,
+    from,
+    clientId: socket.clientId ?? null,
+    sessionId: sessionCtx.sessionId,
+    session: readSession(sessionCtx.session)
+});
+
 const withWsSession = async (socket, source, effect) => {
     try {
         return await socket.withSession(async (sessionCtx) => {
-            if (effect) {
-                return effect(sessionCtx);
+            if (effect) { await effect(sessionCtx); }
+
+            if (sessionCtx.session == null) {
+                return {
+                    ok: true,
+                    from: source,
+                    clientId: socket.clientId ?? null,
+                    sessionId: sessionCtx.sessionId
+                };
             }
 
             ensureSessionShape(sessionCtx.session);
-            return {
-                ok: true,
-                from: source,
-                clientId: socket.clientId ?? null,
-                sessionId: sessionCtx.sessionId,
-                session: readSession(sessionCtx.session)
-            };
+            return createWsPayload(socket, source, sessionCtx);
         });
     } catch (error) {
         return formatWsError(source, error);
@@ -135,44 +145,24 @@ io.on("connection", (socket) => {
     });
 
     socket.on("session:inc", async (ack) => {
-        const payload = await withWsSession(socket, "ws:inc", (sessionCtx) => {
+        const payload = await withWsSession(socket, "ws:inc", async (sessionCtx) => {
             ensureSessionShape(sessionCtx.session);
             sessionCtx.session.wsCount += 1;
-            return {
-                ok: true,
-                from: "ws:inc",
-                clientId: socket.clientId ?? null,
-                sessionId: sessionCtx.sessionId,
-                session: readSession(sessionCtx.session)
-            };
         });
         if (typeof ack === "function") { ack(payload); }
     });
 
     socket.on("session:set-user", async (nameValue, ack) => {
-        const payload = await withWsSession(socket, "ws:set-user", (sessionCtx) => {
+        const payload = await withWsSession(socket, "ws:set-user", async (sessionCtx) => {
             ensureSessionShape(sessionCtx.session);
             sessionCtx.session.user = String(nameValue || "guest").trim().slice(0, 32) || "guest";
-            return {
-                ok: true,
-                from: "ws:set-user",
-                clientId: socket.clientId ?? null,
-                sessionId: sessionCtx.sessionId,
-                session: readSession(sessionCtx.session)
-            };
         });
         if (typeof ack === "function") { ack(payload); }
     });
 
     socket.on("session:reset", async (ack) => {
-        const payload = await withWsSession(socket, "ws:reset", (sessionCtx) => {
+        const payload = await withWsSession(socket, "ws:reset", async (sessionCtx) => {
             sessionCtx.session = null;
-            return {
-                ok: true,
-                from: "ws:reset",
-                clientId: socket.clientId ?? null,
-                sessionId: sessionCtx.sessionId
-            };
         });
         if (typeof ack === "function") { ack(payload); }
     });

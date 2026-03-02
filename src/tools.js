@@ -31,3 +31,18 @@ export const validObject = (any, req=false, msg="argument")=>{
     if (!Array.isArray(obj)) { return obj; }
     throw new Error(`${msg} must be object, not array`);
 }
+
+
+export const validStore = (store) => {
+    const missing = [];
+    if (!is("function", store?.get)) { missing.push("get()"); }
+    if (!is("function", store?.set)) { missing.push("set()"); }
+    if (!is("function", store?.destroy)) { missing.push("destroy()"); }
+    if (!is("function", store?.on)) { missing.push("on()"); }
+
+    if (missing.length) {
+        throw new TypeError(`store is missing required API: ${missing.join(", ")}`);
+    }
+    
+    return store;
+};

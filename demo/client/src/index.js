@@ -63,7 +63,6 @@ const socket = io(serverOrigin, {
     reconnection: true,
     reconnectionAttempts: Infinity
 });
-let isSessionDestroyRecovery = false;
 
 const appendLog = (message, payload) => {
     const stamp = new Date().toISOString().slice(11, 19);
@@ -124,23 +123,6 @@ const wsAction = async (eventName, ...args) => {
     });
 };
 
-const recoverFromSessionDestroy = async () => {
-    if (isSessionDestroyRecovery) { return; }
-    isSessionDestroyRecovery = true;
-
-    appendLog("WS session:destroy");
-    try {
-        await httpAction("read");
-    } catch (err) {
-        appendLog("Session bootstrap error", { error: String(err) });
-    }
-
-    if (socket.connected) { socket.disconnect(); }
-    appendLog("WS reconnect attempt");
-    socket.connect();
-    isSessionDestroyRecovery = false;
-};
-
 socket.on("connect", () => {
     state.socketConnected = true;
     state.socketTransport = socket.io.engine.transport.name;
@@ -158,8 +140,6 @@ socket.on("disconnect", (reason) => {
 socket.on("connect_error", (err) => {
     appendLog("WS connect_error", { error: err?.message || String(err) });
 });
-
-socket.on("session:destroy", recoverFromSessionDestroy);
 
 socket.on("session:state", (payload) => {
     state.lastWs = payload;

@@ -1,16 +1,20 @@
 # @randajan/koa-io-session
 
-[![NPM](https://img.shields.io/npm/v/@randajan/koa-io-session.svg)](https://www.npmjs.com/package/@randajan/koa-io-session) [![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
+[![NPM](https://img.shields.io/npm/v/@randajan/koa-io-session.svg)](https://www.npmjs.com/package/@randajan/koa-io-session)
+[![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
 
 Bridge between `koa-session` and `socket.io` with one shared session store.
 
-You get:
-- standard `ctx.session` for HTTP
-- `ctx.clientId` / `socket.clientId` even before session exists
-- `socket.sessionId` and `socket.withSession(...)` for WebSocket
-- a clear destroy flow for stale sockets
+## Why this library
 
----
+It keeps HTTP and WebSocket session handling in sync while staying close to native `koa-session` behavior.
+
+You get:
+- standard `ctx.session` in HTTP handlers
+- `ctx.clientId` and `socket.clientId` for early client tracking
+- `ctx.sessionId` and `socket.sessionId` resolved by bridge mapping
+- `socket.withSession(handler)` for safe session read/write from WS handlers
+- bridge-level events `sessionStart` and `sessionEnd`
 
 ## Install
 
@@ -18,28 +22,13 @@ You get:
 npm i @randajan/koa-io-session
 ```
 
----
-
-## Use case
-
-Typical scenario:
-1. User signs in via HTTP (`ctx.session.userId = ...`).
-2. Client opens Socket.IO connection.
-3. Socket handlers read/update the same session as HTTP handlers.
-4. Session reset/logout invalidates related sockets.
-
-This is useful for realtime apps where HTTP and WS must stay consistent without duplicate auth/session logic.
-It also helps during first visit when `sessionId` is still missing, because `clientId` already exists.
-
----
-
 ## Quick start
 
 ```js
 import Koa from "koa";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { attachSession } from "@randajan/koa-io-session";
+import bridgeSession from "@randajan/koa-io-session";
 
 const app = new Koa();
 const http = createServer(app.callback());
@@ -47,23 +36,27 @@ const io = new Server(http, {
   cors: { origin: true, credentials: true }
 });
 
-const store = attachSession(app, io, {
-  key: "koa.io.sid",
+const bridge = bridgeSession(app, io, {
+  key: "app.sid",
   signed: true,
   maxAge: 24 * 60 * 60 * 1000,
   sameSite: "lax",
-  httpOnly: true
+  httpOnly: true,
+  secure: false
 });
 
-// Required: cleanup is manual
-store.autoCleanup();
+bridge.on("sessionStart", ({ clientId, sessionId }) => {
+  console.log("sessionStart", clientId, sessionId);
+});
 
-// HTTP route example
+bridge.on("sessionEnd", ({ clientId, sessionId }) => {
+  console.log("sessionEnd", clientId, sessionId);
+});
+
 app.use(async (ctx, next) => {
   if (ctx.path !== "/api/session") { return next(); }
 
-  const action = String(ctx.query.action || "read");
-  if (action === "reset") {
+  if (ctx.query.reset === "1") {
     ctx.session = null;
     ctx.body = { ok: true, from: "http:reset" };
     return;
@@ -71,11 +64,11 @@ app.use(async (ctx, next) => {
 
   if (!ctx.session.createdAt) { ctx.session.createdAt = Date.now(); }
   if (!Number.isFinite(ctx.session.httpCount)) { ctx.session.httpCount = 0; }
-  if (action === "inc") { ctx.session.httpCount += 1; }
+  ctx.session.httpCount += 1;
 
   ctx.body = {
     ok: true,
-    from: `http:${action}`,
+    from: "http",
     clientId: ctx.clientId,
     sessionId: ctx.sessionId,
     session: ctx.session
@@ -97,7 +90,7 @@ io.on("connection", (socket) => {
       if (typeof ack === "function") { ack(payload); }
     } catch (error) {
       if (typeof ack === "function") {
-        ack({ ok: false, from: "ws:get", error: error.message });
+        ack({ ok: false, error: error.message });
       }
     }
   });
@@ -106,155 +99,124 @@ io.on("connection", (socket) => {
 http.listen(3000);
 ```
 
----
+## API
 
-## Socket API
+### `bridgeSession(app, io, opt)`
 
-After `attachSession(app, io, opt)`:
+Creates and returns `SessionBridge`.
 
-1. `socket.sessionId`
-- Session ID resolved from cookie/external key during socket middleware.
+Default export is `bridgeSession`.
 
-2. `socket.clientId`
-- Client identifier from dedicated cookie.
-- Available for HTTP (`ctx.clientId`) and WS (`socket.clientId`) even if session is not created yet.
+### `SessionBridge`
 
-3. `socket.withSession(handler)`
-- Safe wrapper for session operations with per-session lock.
-- `handler` receives `sessionCtx`:
-  - `sessionCtx.sessionId` -> session ID
-  - `sessionCtx.session` -> mutable session object
-  - `sessionCtx.socket` -> socket instance
-- Return value of `handler` is returned by `withSession`.
+`SessionBridge` extends Node.js `EventEmitter`.
 
-Example:
+Properties:
+- `bridge.store` is the active store instance
 
-```js
-const result = await socket.withSession(async (sessionCtx) => {
-  sessionCtx.session.wsCount = (sessionCtx.session.wsCount || 0) + 1;
-  return { ok: true, sid: sessionCtx.sessionId };
-});
-```
+Events:
+- `sessionStart` payload: `{ clientId, sessionId }`
+- `sessionEnd` payload: `{ clientId, sessionId }`
 
-Destroy session from WS:
+Runtime additions:
+- HTTP context: `ctx.clientId`, `ctx.sessionId`
+- Socket: `socket.clientId`, `socket.sessionId`, `socket.withSession(handler)`
 
-```js
-await socket.withSession(async (sessionCtx) => {
-  sessionCtx.session = null;
-});
-```
+### `socket.withSession(handler)`
 
----
+`handler` receives one object:
+- `sessionCtx.sessionId`
+- `sessionCtx.session`
+- `sessionCtx.socket`
 
-## Session model behavior
-
-1. WS does not create missing sessions.
-- If session is missing in store, `withSession` throws `Session not found`.
-- New session must be created via HTTP/Koa flow.
-
-2. Change detection:
-- If session changed, store `set` is called.
-- If session did not change, throttled `touch` is used to refresh TTL.
-
-3. Concurrency:
-- Operations for same `sessionId` are serialized to avoid race conditions.
-
----
-
-## Destroy flow
-
-When store emits `destroy` for a SID:
-1. all sockets in room `sessionId:<sid>` receive `session:destroy`
-2. after ~200 ms, these sockets are forcibly disconnected
-
-Client should react to `session:destroy` by:
-1. performing HTTP bootstrap request (to get new cookie/session)
-2. reconnecting socket
-
----
-
-## Reserved names and limitations
-
-1. Room naming:
-- library joins sockets into rooms:
-- `sessionId:<sid>`
-- `clientId:<cid>`
-
-2. Reserved socket event:
-- library emits `session:destroy`
-
-3. Reserved socket properties:
-- library defines `socket.clientId`, `socket.sessionId` and `socket.withSession`
-
-4. WS cannot bootstrap missing session:
-- when session is missing in store, `withSession` throws `Session not found`
-- new session must be created via HTTP/Koa flow
-
-5. Session ID is fixed for current connection:
-- if cookie/session changes, existing socket must reconnect to use new SID
-
-6. `clientId` is routing-only metadata:
-- it is useful for grouping sockets before session bootstrap
-- do not use it as authentication or authorization identifier
-
----
-
-## Required integration details
-
-1. Cleanup is manual:
-- call `store.autoCleanup(interval)` yourself
-
-2. Custom store API is required:
-- `get(sid)`
-- `set(sid, session, maxAge)`
-- `destroy(sid)`
-- `touch(sid, maxAge)`
-- `on(eventName, callback)`
-
-3. Store must emit destroy event:
-- event name: `destroy`
-- callback signature expected by this library: `(_store, sid) => {}`
-
-4. Destroy socket behavior:
-- library emits `session:destroy`
-- library disconnects socket room ~200 ms later
-
----
+Rules:
+- throws if `socket.sessionId` is missing
+- throws `"Session not found"` if store does not have the session
+- if `sessionCtx.session = null`, session is destroyed
+- if session changed, store `set` is called
+- calls for same `sessionId` are serialized
 
 ## Options
 
-`attachSession(app, io, opt)` forwards session options to `koa-session`.
+`opt` is mostly forwarded to `koa-session`, except internal bridge keys:
 
-Defaults set by this library when missing:
-- `opt.signed = true`
-- `opt.key = generateUid(12)`
-- `opt.maxAge = 86_400_000`
-- `app.keys` auto-generated if missing
+- `store`
+- `autoCleanup`
+- `autoCleanupMs`
+- `clientKey`
+- `clientMaxAge`
+- `clientAlwaysRoll`
 
-Optional:
-- `opt.store` custom store implementing required API above
-- `opt.externalKey` works as in `koa-session`
-- `opt.ioSession.clientIdKey` overrides client id cookie key (`${opt.key}.cid` by default)
-- `opt.ioSession.clientIdMaxAge` overrides client id cookie maxAge (default 1 year)
+Defaults:
+- `key`: random `generateUid(12)`
+- `maxAge`: `30 days`
+- `signed`: `true`
+- `store`: `new SessionStore(opt)`
+- `clientKey`: `${key}.cid`
+- `clientMaxAge`: `1 year`
+- `clientAlwaysRoll`: `true`
+- `app.keys`: auto-generated if missing
 
----
+Notes:
+- set stable `app.keys` in production
+- keep cookie settings consistent with your deployment (`sameSite`, `secure`, domain/path)
+
+## `SessionStore`
+
+Default in-memory store with TTL.
+
+Constructor:
+- `new SessionStore({ maxAge, autoCleanup, autoCleanupMs })`
+
+Methods:
+- `get(sid)`
+- `set(sid, session, maxAge?)`
+- `destroy(sid)` (also used by `delete`)
+- `cleanup()`
+- `on(eventName, callback)`
+
+Events emitted by store:
+- `set`
+- `destroy`
+- `cleanup`
+
+## Custom store contract
+
+Custom store is valid if it implements:
+- `get(sid)`
+- `set(sid, session, maxAge?)`
+- `destroy(sid)`
+- `on(eventName, callback)`
+
+Sync and async implementations are both supported.
+
+Important integration rule:
+- your store must emit `destroy` whenever a session is removed, otherwise bridge mapping can get stale
+
+## Behavior and limitations
+
+1. Session creation is HTTP-first.
+- WebSocket handler does not create missing sessions.
+
+2. Bridge mapping is in-memory.
+- After process restart, mapping is rebuilt from incoming cookies plus store state.
+
+3. Signed cookies depend on stable keys.
+- If `app.keys` change, previously signed cookies become invalid.
+
+4. Change detection in WS uses `JSON.stringify`.
+- Non-serializable or cyclic data are not recommended in session payloads.
 
 ## Exports
 
 ```js
-import attachSession, { attachSession, SessionStore, generateUid } from "@randajan/koa-io-session";
+import bridgeSession, {
+  bridgeSession,
+  SessionBridge,
+  SessionStore,
+  generateUid
+} from "@randajan/koa-io-session";
 ```
-
----
-
-## Production checklist
-
-1. Set stable `app.keys` and fixed cookie `opt.key`.
-2. Use persistent store (Redis/DB), not in-memory store.
-3. Call `store.autoCleanup(...)`.
-4. Handle `session:destroy` on client and reconnect via HTTP bootstrap.
-
----
 
 ## License
 

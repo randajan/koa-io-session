@@ -1,91 +1,95 @@
 import { EventEmitter } from "events";
-import { solid } from "@randajan/props";
+import { ServerResponse } from "http";
+import { solid, virtual } from "@randajan/props";
 
-const defaultOpt = {
-    rooms: {
-        clientId: "clientId",
-        sessionId: "sessionId"
-    },
-    socketEvents: {
-        sessionStart: "session:start",
-        sessionEnd: "session:destroy"
-    },
-    disconnectDelayMs: 200
-};
+import { generateUid } from "../tools.js";
+import { createKoaSession, createClientCookie } from "../httpSession.js";
+import { applySessionHandler } from "../socketSession.js";
 
-const mergeOpt = (opt = {}) => ({
-    ...defaultOpt,
-    ...opt,
-    rooms: {
-        ...defaultOpt.rooms,
-        ...opt.rooms
-    },
-    socketEvents: {
-        ...defaultOpt.socketEvents,
-        ...opt.socketEvents
-    }
-});
+import { formatOptions } from "../formatOptions.js";
+import { Bridge } from "./Bridge.js";
 
-const toRoom = (prefix, id) => `${prefix}:${id}`;
-
-const toDelay = (value, fallback) => {
-    if (!Number.isFinite(value)) { return fallback; }
-    if (value < 0) { return fallback; }
-    return value;
-};
 
 export class SessionBridge extends EventEmitter {
 
-    constructor(store, io, opt = {}) {
-        super(opt.eventEmitterOpt);
+    constructor(app, io, opt = {}) {
+        super();
 
-        const cfg = mergeOpt(opt);
+        if (!app.keys) { app.keys = Array(6).fill().map(() => generateUid(12)); }
+
+        const o = formatOptions(opt);
+        const { store } = o.koaOpt;
+
+        const brg = new Bridge({
+            onSet:pair=>this.emit("sessionStart", pair),
+            onDelete:pair=>this.emit("sessionEnd", pair)
+        });
+
+        const cc = createClientCookie(o.clientOpt);
+        const [koaSession, sc] = createKoaSession(o.koaOpt, app, (ctx, sid)=>{
+            const cid = cc.get(ctx);
+            brg.set(cid, sid);
+        });
+
+        const regenerateSid = async (ctx, cid, reqSid)=>{
+            if (cid == null || reqSid == null) { return; } //empty cid or sid
+
+            const brgSid = brg.getByCid(cid);
+            if (brgSid == reqSid) { return; } //correct sid for this client
+            else if (brgSid) { sc.set(ctx, brgSid); return; } //this client have different sid
+
+            if (brg.getBySid(reqSid)) { return; } //sid is occupied by different client
+            if (!await store.get(reqSid)) { return; } //there is no sesssion with that sid
+            brg.set(cid, reqSid); //attach session to this client
+        }
+        
+        app.use(koaSession);
+
+        // pro HTTP jen sessionId, nic víc nepotřebujeme
+        app.use(async (ctx, next) => {
+            let cid = cc.get(ctx);
+            const sid = sc.get(ctx);
+
+            if (!cid) { cc.set(ctx, cid = generateUid(24)); }
+            else if (o.clientAlwaysRoll) { cc.set(ctx, cid); }
+            
+            await regenerateSid(ctx, cid, sid);
+            
+            solid(ctx, "clientId", cid);
+            virtual(ctx, "sessionId", _=>brg.getByCid(cid));
+            await next();
+        });
+
+        /* ------------------  WebSocket  ------------------------------------- */
+        io.use(async (socket, next) => {
+            const req = socket.request;
+            const res = req.res ?? socket.response ?? new ServerResponse(req);
+            const ctx = app.createContext(req, res);
+
+            await koaSession(ctx, async () => {});
+            const cid = cc.get(ctx);
+            const sid = sc.get(ctx);
+
+            await regenerateSid(ctx, cid, sid);
+
+            solid(socket, "clientId", cid);
+            virtual(socket, "sessionId", _=>brg.getByCid(cid));
+            solid(socket, "withSession", async (handler)=>{
+                return applySessionHandler(socket, handler, store);
+            }, false);
+
+            await next();
+        });
+
+        store.on("destroy", (_store, sid)=>{
+            if (!sid) { return; }
+            brg.deleteBySid(sid);
+        });
+        
 
         solid(this, "store", store);
-        solid(this, "io", io || null);
-        solid(this, "rooms", cfg.rooms);
-        solid(this, "socketEvents", cfg.socketEvents);
-        solid(this, "disconnectDelayMs", toDelay(cfg.disconnectDelayMs, defaultOpt.disconnectDelayMs));
     }
 
-    roomByClientId(clientId) {
-        return toRoom(this.rooms.clientId, clientId);
-    }
 
-    roomBySessionId(sessionId) {
-        return toRoom(this.rooms.sessionId, sessionId);
-    }
-
-    emitSessionStart(payload = {}) {
-        const { clientId, sessionId } = payload;
-        this.emit("sessionStart", payload);
-
-        if (!this.io || !clientId) { return false; }
-        this.io.to(this.roomByClientId(clientId)).emit(this.socketEvents.sessionStart, {
-            sessionId
-        });
-        return true;
-    }
-
-    emitSessionEnd(payload = {}) {
-        const { sessionId } = payload;
-        this.emit("sessionEnd", payload);
-
-        if (!this.io || !sessionId) { return false; }
-
-        const room = this.io.in(this.roomBySessionId(sessionId));
-        room.emit(this.socketEvents.sessionEnd, payload);
-
-        setTimeout(() => {
-            room.disconnectSockets(true);
-        }, this.disconnectDelayMs);
-
-        return true;
-    }
-
-    autoCleanup(interval) {
-        if (typeof this.store?.autoCleanup !== "function") { return undefined; }
-        return this.store.autoCleanup(interval);
-    }
 }
 
