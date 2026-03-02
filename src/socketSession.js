@@ -1,6 +1,6 @@
 import { solids } from "@randajan/props";
 import { createQueue } from "@randajan/queue";
-import { isObject } from "./tools";
+import { valid } from "./tools.js";
 
 
 const sidLocks = new Map();
@@ -68,7 +68,8 @@ const runSessionHandler = async (socket, handler, opt={}) => {
     const { store, maxAge } = opt;
     const current = await store.get(sid);
 
-    if (!isObject(current)) { throw new Error("Session not found"); }
+    if (!current) { throw new Error("Session not found"); }
+
     const session = current;
     const sessionCtx = createSessionCtx(sid, session, socket);
 
@@ -81,9 +82,7 @@ const runSessionHandler = async (socket, handler, opt={}) => {
         return result;
     }
 
-    if (!isObject(sessionCtx.session)) {
-        throw new TypeError("sessionCtx.session must be an object or null");
-    }
+    sessionCtx.session = validObject(sessionCtx.session, false, "session");
 
     if (isSessionHashChanged(originalHash, sessionCtx.session)) {
         clearTouchQueue(sid);

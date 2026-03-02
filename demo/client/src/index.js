@@ -77,9 +77,13 @@ const render = () => {
     const httpId = state.lastHttp?.sessionId ?? null;
     const wsId = state.lastWs?.sessionId ?? null;
     const sameSession = Boolean(httpId && wsId && httpId === wsId);
+    const httpClientId = state.lastHttp?.clientId ?? null;
+    const wsClientId = state.lastWs?.clientId ?? null;
+    const sameClient = Boolean(httpClientId && wsClientId && httpClientId === wsClientId);
 
     $status.textContent = `Server ${serverOrigin} | socket ${state.socketConnected ? "connected" : "disconnected"}${state.socketTransport ? ` (${state.socketTransport})` : ""}`;
     $snapshot.textContent = JSON.stringify({
+        clientId: { http: httpClientId, ws: wsClientId, match: sameClient },
         sessionId: { http: httpId, ws: wsId, match: sameSession },
         http: state.lastHttp,
         ws: state.lastWs

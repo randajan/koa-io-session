@@ -6,6 +6,7 @@ Bridge between `koa-session` and `socket.io` with one shared session store.
 
 You get:
 - standard `ctx.session` for HTTP
+- `ctx.clientId` / `socket.clientId` even before session exists
 - `socket.sessionId` and `socket.withSession(...)` for WebSocket
 - a clear destroy flow for stale sockets
 
@@ -28,6 +29,7 @@ Typical scenario:
 4. Session reset/logout invalidates related sockets.
 
 This is useful for realtime apps where HTTP and WS must stay consistent without duplicate auth/session logic.
+It also helps during first visit when `sessionId` is still missing, because `clientId` already exists.
 
 ---
 
@@ -74,6 +76,7 @@ app.use(async (ctx, next) => {
   ctx.body = {
     ok: true,
     from: `http:${action}`,
+    clientId: ctx.clientId,
     sessionId: ctx.sessionId,
     session: ctx.session
   };
@@ -86,6 +89,7 @@ io.on("connection", (socket) => {
         return {
           ok: true,
           from: "ws:get",
+          clientId: socket.clientId,
           sessionId: sessionCtx.sessionId,
           session: sessionCtx.session
         };
@@ -111,7 +115,11 @@ After `attachSession(app, io, opt)`:
 1. `socket.sessionId`
 - Session ID resolved from cookie/external key during socket middleware.
 
-2. `socket.withSession(handler)`
+2. `socket.clientId`
+- Client identifier from dedicated cookie.
+- Available for HTTP (`ctx.clientId`) and WS (`socket.clientId`) even if session is not created yet.
+
+3. `socket.withSession(handler)`
 - Safe wrapper for session operations with per-session lock.
 - `handler` receives `sessionCtx`:
   - `sessionCtx.sessionId` -> session ID
@@ -168,13 +176,15 @@ Client should react to `session:destroy` by:
 ## Reserved names and limitations
 
 1. Room naming:
-- library joins sockets into room `sessionId:<sid>`
+- library joins sockets into rooms:
+- `sessionId:<sid>`
+- `clientId:<cid>`
 
 2. Reserved socket event:
 - library emits `session:destroy`
 
 3. Reserved socket properties:
-- library defines `socket.sessionId` and `socket.withSession`
+- library defines `socket.clientId`, `socket.sessionId` and `socket.withSession`
 
 4. WS cannot bootstrap missing session:
 - when session is missing in store, `withSession` throws `Session not found`
@@ -182,6 +192,10 @@ Client should react to `session:destroy` by:
 
 5. Session ID is fixed for current connection:
 - if cookie/session changes, existing socket must reconnect to use new SID
+
+6. `clientId` is routing-only metadata:
+- it is useful for grouping sockets before session bootstrap
+- do not use it as authentication or authorization identifier
 
 ---
 
@@ -220,6 +234,8 @@ Defaults set by this library when missing:
 Optional:
 - `opt.store` custom store implementing required API above
 - `opt.externalKey` works as in `koa-session`
+- `opt.ioSession.clientIdKey` overrides client id cookie key (`${opt.key}.cid` by default)
+- `opt.ioSession.clientIdMaxAge` overrides client id cookie maxAge (default 1 year)
 
 ---
 

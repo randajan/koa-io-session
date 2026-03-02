@@ -60,6 +60,7 @@ const withWsSession = async (socket, source, effect) => {
             return {
                 ok: true,
                 from: source,
+                clientId: socket.clientId ?? null,
                 sessionId: sessionCtx.sessionId,
                 session: readSession(sessionCtx.session)
             };
@@ -111,6 +112,7 @@ app.use(async (ctx, next) => {
     ctx.body = {
         ok: true,
         from: `http:${action}`,
+        clientId: ctx.clientId ?? null,
         sessionId: ctx.sessionId,
         session: readSession(ctx.session)
     };
@@ -139,6 +141,7 @@ io.on("connection", (socket) => {
             return {
                 ok: true,
                 from: "ws:inc",
+                clientId: socket.clientId ?? null,
                 sessionId: sessionCtx.sessionId,
                 session: readSession(sessionCtx.session)
             };
@@ -153,6 +156,7 @@ io.on("connection", (socket) => {
             return {
                 ok: true,
                 from: "ws:set-user",
+                clientId: socket.clientId ?? null,
                 sessionId: sessionCtx.sessionId,
                 session: readSession(sessionCtx.session)
             };
@@ -166,6 +170,7 @@ io.on("connection", (socket) => {
             return {
                 ok: true,
                 from: "ws:reset",
+                clientId: socket.clientId ?? null,
                 sessionId: sessionCtx.sessionId
             };
         });
