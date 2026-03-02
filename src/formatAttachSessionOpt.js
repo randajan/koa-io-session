@@ -1,4 +1,4 @@
-import { _customOptKeys, _defaultOpt } from "./const.js";
+import { _customOptKeys, ms } from "./const.js";
 import { generateUid, valid, validRange } from "./tools.js";
 import { wrapExternalKey } from "./wrappers.js";
 
@@ -10,7 +10,7 @@ const pickKoaOpt = (rawOpt, onSessionSet) => {
     }
 
     koaOpt.key = valid("string", koaOpt.key, false, "key") ?? generateUid(12);
-    koaOpt.maxAge = validRange(0, "YEAR", koaOpt.maxAge, false) ?? 86_400_000;
+    koaOpt.maxAge = validRange(ms.m(), ms.y(), koaOpt.maxAge, false) ?? ms.M();
     koaOpt.signed = valid("boolean", koaOpt.signed, false, "signed") ?? true;
     koaOpt.store = wrapStore(opt.store);
     koaOpt.externalKey = wrapExternalKey(koaOpt, onSessionSet);
@@ -27,19 +27,21 @@ export const formatAttachSessionOpt = (opt = {}, onSessionSet) => {
 
     const koa = pickKoaOpt(opt, onSessionSet);
 
-    const cleanupInterval = validInterval(opt.cleanupInterval, false, "cleanupInterval") ?? Math.min("HOUR", koa.maxAge/10);
+    const autoCleanup = valid("boolean", opt.autoCleanup, false, "autoCleanup") ?? true;
+    const autoCleanupMs = validInterval(opt.autoCleanupMs, false, "autoCleanupMs") ?? Math.max(ms.m(), Math.min(ms.h(), koa.maxAge/10));
     const clientKey = valid("string", opt.clientKey) ?? `${koa.key}.cid`;
     
-    const clientMaxAge = validInterval(opt.clientMaxAge, false, "clientMaxAge") ?? _defaultOpt.clientMaxAge;
+    const clientMaxAge = validInterval(opt.clientMaxAge, false, "clientMaxAge") ?? ms.y();
     const clientAlwaysRoll = valid("boolean", opt.clientAlwaysRoll, "clientAlwaysRoll") ?? true;
 
     const socketTouch = valid("boolean", opt.socketTouch, "socketTouch") ?? true;
-    const socketTouchSoftMs = validInterval(opt.socketTouchSoftMs, false, "socketTouchSoftMs") ?? _defaultOpt.socketTouchSoftMs;
-    const socketTouchHardMs = validInterval(opt.socketTouchHardMs, false, "socketTouchHardMs") ?? _defaultOpt.socketTouchHardMs;
+    const socketTouchSoftMs = validInterval(opt.socketTouchSoftMs, false, "socketTouchSoftMs") ?? ms.s(5);
+    const socketTouchHardMs = validInterval(opt.socketTouchHardMs, false, "socketTouchHardMs") ?? ms.m();
 
     return {
         koa,
-        cleanupInterval,
+        autoCleanup,
+        autoCleanupMs,
         clientKey,
         clientMaxAge,
         clientAlwaysRoll,
