@@ -1,5 +1,5 @@
 import { solids } from "@randajan/props";
-import { validObject } from "./tools.js";
+import { is, validObject } from "./tools.js";
 
 
 const sidLocks = new Map();
@@ -34,12 +34,18 @@ const withLock = async (task, socket, ...args) => {
     }
 };
 
-const runSessionHandler = async (socket, handler, store) => {
+const applyOnMissing = (onMissing)=>{
+    if (onMissing instanceof Error) { throw onMissing; }
+    if (is("function", onMissing)) { return onMissing(); }
+    return onMissing;
+}
+
+const runSessionHandler = async (socket, handler, store, onMissing) => {
     const sid = socket.sessionId;
 
     const current = await store.get(sid);
 
-    if (!current) { throw new Error("Session not found"); }
+    if (!current) { return applyOnMissing(onMissing); }
 
     const session = current;
     const sessionCtx = createSessionCtx(sid, session, socket);
@@ -61,14 +67,12 @@ const runSessionHandler = async (socket, handler, store) => {
     return result;
 };
 
-export const applySessionHandler = async (socket, handler, store) => {
+export const applySessionHandler = async (socket, handler, store, onMissing) => {
 
     if (typeof handler !== "function") {
         throw new TypeError("socket.withSession(handler) requires a function");
     }
-    if (!socket.sessionId) {
-        throw new Error("Missing session id");
-    }
+    if (!socket.sessionId) { return applyOnMissing(onMissing); }
 
-    return withLock(runSessionHandler, socket, handler, store);
+    return withLock(runSessionHandler, socket, handler, store, onMissing);
 };

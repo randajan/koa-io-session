@@ -13,7 +13,7 @@ You get:
 - standard `ctx.session` in HTTP handlers
 - `ctx.clientId` and `socket.clientId` for early client tracking
 - `ctx.sessionId` and `socket.sessionId` resolved by bridge mapping
-- `socket.withSession(handler)` for safe session read/write from WS handlers
+- `socket.withSession(handler, onMissing?)` for strict or optional WS session handling
 - bridge-level events `sessionStart` and `sessionEnd`
 
 ## Install
@@ -120,9 +120,9 @@ Events:
 
 Runtime additions:
 - HTTP context: `ctx.clientId`, `ctx.sessionId`
-- Socket: `socket.clientId`, `socket.sessionId`, `socket.withSession(handler)`
+- Socket: `socket.clientId`, `socket.sessionId`, `socket.withSession(handler, onMissing?)`
 
-### `socket.withSession(handler)`
+### `socket.withSession(handler, onMissing?)`
 
 `handler` receives one object:
 - `sessionCtx.sessionId`
@@ -130,11 +130,23 @@ Runtime additions:
 - `sessionCtx.socket`
 
 Rules:
-- throws if `socket.sessionId` is missing
-- throws `"Session not found"` if store does not have the session
+- default behavior (`onMissing` not provided): throws `Error("Session missing")`
+- missing session means `socket.sessionId` is missing
+- missing session means store does not have session for current sid
 - if `sessionCtx.session = null`, session is destroyed
 - if session changed, store `set` is called
 - calls for same `sessionId` are serialized
+
+`onMissing` behavior:
+- if `onMissing` is an `Error`, it is thrown
+- if `onMissing` is a function, its return value is used
+- otherwise, `onMissing` value is returned as-is
+
+Examples:
+- strict (default): `await socket.withSession(handler)`
+- silent undefined on missing: `await socket.withSession(handler, undefined)`
+- custom fallback value: `await socket.withSession(handler, { ok: false })`
+- custom fallback callback: `await socket.withSession(handler, () => ({ ok: false }))`
 
 ## Options
 

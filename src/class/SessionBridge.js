@@ -74,8 +74,9 @@ export class SessionBridge extends EventEmitter {
 
             solid(socket, "clientId", cid);
             virtual(socket, "sessionId", _=>brg.getByCid(cid));
-            solid(socket, "withSession", async (handler)=>{
-                return applySessionHandler(socket, handler, store);
+            solid(socket, "withSession", async function (handler, onMissing) {
+                const onm = arguments.length > 1 ? onMissing : new Error("Session missing");
+                return applySessionHandler(socket, handler, store, onm);
             }, false);
 
             await next();
