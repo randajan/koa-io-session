@@ -23,7 +23,7 @@ export class Bridge {
         this.c2s.set(cid, sid);
         this.s2c.set(sid, cid);
 
-        this.onSet({clientId:cid, sessionId:sid});
+        this.onSet(cid, sid);
         return true;
     }
    
@@ -36,7 +36,7 @@ export class Bridge {
         if (skipIf && cid == skipIf) { return false; }
         this.s2c.delete(sid);
         this.c2s.delete(cid);
-        this.onDelete({clientId:cid, sessionId:sid});
+        this.onDelete(cid, sid);
         return true;
     }
 
@@ -46,7 +46,7 @@ export class Bridge {
         if (skipIf && sid == skipIf) { return false; }
         this.c2s.delete(cid);
         this.s2c.delete(sid);
-        this.onDelete({clientId:cid, sessionId:sid});
+        this.onDelete(cid, sid);
         return true;
     }
 }

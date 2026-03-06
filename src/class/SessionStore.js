@@ -1,8 +1,7 @@
 import { solid } from "@randajan/props";
 import { EventEmitter } from "events";
-import { valid, validInterval, validRange } from "../tools.js";
-import { ms } from "../const.js";
-
+import { is, valid, validInterval, validRange, validStore } from "../tools.js";
+import { _errPrefix, _privs, ms } from "../const.js";
 
 const formatState = (session, maxAge, prevTTL, maxAgeDefault)=>{
     const ttl = maxAge ?? prevTTL ?? maxAgeDefault;
@@ -10,66 +9,100 @@ const formatState = (session, maxAge, prevTTL, maxAgeDefault)=>{
     return { session, expiresAt, ttl };
 }
 
-export class SessionStore extends Map {
+const requireList = (drv, method) => {
+    if (!drv.list) {
+        throw new TypeError(`${_errPrefix} SessionStore.${method}() requires backend method store.list().`);
+    }
+};
 
-    constructor(opt={}) {
+export class SessionStore extends EventEmitter {
+
+    static is(any) { return any instanceof SessionStore; }
+
+    constructor(driver, opt={}) {
         super();
 
-        const maxAge = validRange(ms.s(), ms.y(), opt.maxAge, false, "maxAge") ?? ms.M();
+        const _p = { drv:validStore(driver) }
+
+        const maxAge = validRange(ms.m(), ms.y(), opt.maxAge, false, "maxAge") ?? ms.M();
         const autoCleanup = valid("boolean", opt.autoCleanup, false, "autoCleanup") ?? true;
-        const autoCleanupMs = validInterval(opt.autoCleanupMs, false, "autoCleanupMs") ?? Math.max(ms.s(), Math.min(ms.h(), maxAge/10));
-            
+
         solid(this, "maxAge", maxAge);
-        solid(this, "event", new EventEmitter());
 
-        if (!autoCleanup) { return; }
+        _privs.set(this, _p);
 
-        setInterval(_=>this.cleanup(), autoCleanupMs);
+        if (autoCleanup) { this.startCleanup(validInterval(opt.autoCleanupMs, false, "autoCleanupMs")); }
     }
 
-    on(eventName, callback) {
-        return this.event.on(eventName, callback);
+    async list() {
+        const { drv } = _privs.get(this);
+        requireList(drv, "list");
+        return drv.list();
     }
 
-    get(sid) {
-        const d = super.get(sid);
+    async get(sid) {
+        const { drv } = _privs.get(this);
+        const d = await drv.get(sid);
         if (!d) { return; }
         if (Date.now() < d.expiresAt) { return d.session; }
-        this.delete(sid);
+        await this.destroy(sid);
     }
 
-    set(sid, session, maxAge) {
-        const d = super.get(sid);
+    async set(sid, session, maxAge) {
+        const { drv } = _privs.get(this);
+        const d = await drv.get(sid);
         if (session == null) { return !d || this.destroy(sid); }
-        super.set(sid, formatState(session, maxAge, d?.ttl, this.maxAge));
-        this.event.emit("set", this, sid, !d);
+        const isOk = await drv.set(sid, formatState(session, maxAge, d?.ttl, this.maxAge));
+        if (isOk === false) { return false; }
+        this.emit("set", this, sid, !d);
         return true;
     }
 
-    delete(sid) {
-        return this.destroy(sid);
-    }
-
-    destroy(sid) {
-        if (this.has(sid)) {
-            super.delete(sid);
-            this.event.emit("destroy", this, sid);
-        }
+    async destroy(sid) {
+        const { drv } = _privs.get(this);
+        const isOk = await drv.destroy(sid);
+        if (isOk === false) { return false; }
+        this.emit("destroy", this, sid);
         return true;
     }
 
-    cleanup() {
+    async cleanup() {
+        const { drv } = _privs.get(this);
+        requireList(drv, "cleanup");
+
+        const list = await drv.list();
         const now = Date.now();
         let cleared = 0;
 
-        for (const [sid, d] of this.entries()) {
-            if (now < d.expiresAt) { continue; }
-            if (this.destroy(sid)) { cleared++; }
-        }
+        await Promise.all([...list].map(async sid=>{
+            const d = await drv.get(sid);
+            if (!d) { return; }
+            if (now < d.expiresAt) { return; }
+            if (await this.destroy(sid)) { cleared++; }
+        }));
 
-        if (cleared) { this.event.emit("cleanup", this, cleared); }
+        if (is("function", drv.optimize)) { await drv.optimize(cleared); }
 
+        if (cleared) { this.emit("cleanup", this, cleared); }
         return cleared;
+    }
+
+    startCleanup(interval) {
+        const { maxAge } = this;
+        const _p = _privs.get(this);
+        requireList(_p.drv, "startCleanup");
+        const int = validInterval(interval, false, "interval") ?? Math.max(ms.m(), Math.min(ms.h(), maxAge/10));
+        clearInterval(_p.cleanupIntervalId);
+        _p.cleanupIntervalId = setInterval(_=>this.cleanup().catch(()=>{}), int);
+        return true;
+    }
+
+    stopCleanup() {
+        const _p = _privs.get(this);
+        if (!_p.cleanupIntervalId) { return false; }
+        clearInterval(_p.cleanupIntervalId);
+        delete _p.cleanupIntervalId;
+        return true;
     }
 
 }

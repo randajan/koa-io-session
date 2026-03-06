@@ -8,6 +8,8 @@ import { applySessionHandler } from "../socketSession.js";
 
 import { formatOptions } from "../formatOptions.js";
 import { Bridge } from "./Bridge.js";
+import { _errPrefix, _privs } from "../const.js";
+import { TempMap } from "./TempMap.js";
 
 
 export class SessionBridge extends EventEmitter {
@@ -20,9 +22,13 @@ export class SessionBridge extends EventEmitter {
         const o = formatOptions(opt);
         const { store } = o.koaOpt;
 
+        const tmp = new TempMap(5000);
         const brg = new Bridge({
-            onSet:pair=>this.emit("sessionStart", pair),
-            onDelete:pair=>this.emit("sessionEnd", pair)
+            onSet:(clientId, sessionId)=>{
+                const isNew = !!tmp.get(sessionId, true);
+                this.emit("sessionSet", { clientId, sessionId, isNew, isInit:true });
+            },
+            onDelete:(clientId, sessionId)=>this.emit("sessionDestroy", { clientId, sessionId })
         });
 
         const cc = createClientCookie(o.clientOpt);
@@ -31,7 +37,7 @@ export class SessionBridge extends EventEmitter {
             brg.set(cid, sid);
         });
 
-        const regenerateSid = async (ctx, cid, reqSid)=>{
+        const reviveSid = async (ctx, cid, reqSid)=>{
             if (cid == null || reqSid == null) { return; } //empty cid or sid
 
             const brgSid = brg.getByCid(cid);
@@ -53,7 +59,7 @@ export class SessionBridge extends EventEmitter {
             if (!cid) { cc.set(ctx, cid = generateUid(24)); }
             else if (o.clientAlwaysRoll) { cc.set(ctx, cid); }
             
-            await regenerateSid(ctx, cid, sid);
+            await reviveSid(ctx, cid, sid);
             
             solid(ctx, "clientId", cid);
             virtual(ctx, "sessionId", _=>brg.getByCid(cid));
@@ -70,12 +76,12 @@ export class SessionBridge extends EventEmitter {
             const cid = cc.get(ctx);
             const sid = sc.get(ctx);
 
-            await regenerateSid(ctx, cid, sid);
+            await reviveSid(ctx, cid, sid);
 
             solid(socket, "clientId", cid);
             virtual(socket, "sessionId", _=>brg.getByCid(cid));
             solid(socket, "withSession", async function (handler, onMissing) {
-                const onm = arguments.length > 1 ? onMissing : new Error("Session missing");
+                const onm = arguments.length > 1 ? onMissing : new Error(`${_errPrefix} Session is missing for this socket.`);
                 return applySessionHandler(socket, handler, store, onm);
             }, false);
 
@@ -86,9 +92,26 @@ export class SessionBridge extends EventEmitter {
             if (!sid) { return; }
             brg.deleteBySid(sid);
         });
-        
+
+        store.on("set", (_store, sid, isNew)=>{
+            if (!sid) { return; }
+            const cid = brg.getBySid(sid);
+            if (!cid) { tmp.set(sid, isNew, false); return; }
+            if (isNew) { console.warn(`${_errPrefix} Invariant broken: store emitted set(isNew=true) for already bound sid=${sid}, cid=${cid}`); }
+            this.emit("sessionSet", { clientId:cid, sessionId:sid, isNew:!!isNew, isInit:false });
+        });
 
         solid(this, "store", store);
+
+        _privs.set(this, brg);
+    }
+
+    getSessionId(clientId) {
+        return _privs.get(this).getByCid(clientId);
+    }
+
+    getClientId(sessionId) {
+        return _privs.get(this).getBySid(sessionId);
     }
 
 

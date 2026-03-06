@@ -1,5 +1,6 @@
 import { solids } from "@randajan/props";
 import { is, validObject } from "./tools.js";
+import { _errPrefix } from "./const.js";
 
 
 const sidLocks = new Map();
@@ -70,7 +71,7 @@ const runSessionHandler = async (socket, handler, store, onMissing) => {
 export const applySessionHandler = async (socket, handler, store, onMissing) => {
 
     if (typeof handler !== "function") {
-        throw new TypeError("socket.withSession(handler) requires a function");
+        throw new TypeError(`${_errPrefix} socket.withSession(handler) expects 'handler' to be a function.`);
     }
     if (!socket.sessionId) { return applyOnMissing(onMissing); }
 

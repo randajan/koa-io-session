@@ -1,5 +1,7 @@
 import { SessionBridge } from "./class/SessionBridge.js";
 import { SessionStore } from "./class/SessionStore.js";
+import { LiveStore } from "./stores/LiveStore.js";
+import { FileStore } from "./stores/FileStore.js";
 import { generateUid } from "./tools.js";
 
 
@@ -10,6 +12,8 @@ export default bridgeSession;
 export {
     bridgeSession,
     generateUid,
+    LiveStore,
+    FileStore,
     SessionStore,
     SessionBridge
 }

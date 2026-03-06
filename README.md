@@ -14,7 +14,7 @@ You get:
 - `ctx.clientId` and `socket.clientId` for early client tracking
 - `ctx.sessionId` and `socket.sessionId` resolved by bridge mapping
 - `socket.withSession(handler, onMissing?)` for strict or optional WS session handling
-- bridge-level events `sessionStart` and `sessionEnd`
+- bridge-level events `sessionSet` and `sessionDestroy`
 
 ## Install
 
@@ -45,12 +45,12 @@ const bridge = bridgeSession(app, io, {
   secure: false
 });
 
-bridge.on("sessionStart", ({ clientId, sessionId }) => {
-  console.log("sessionStart", clientId, sessionId);
+bridge.on("sessionSet", ({ clientId, sessionId, isNew, isInit }) => {
+  console.log("sessionSet", clientId, sessionId, { isNew, isInit });
 });
 
-bridge.on("sessionEnd", ({ clientId, sessionId }) => {
-  console.log("sessionEnd", clientId, sessionId);
+bridge.on("sessionDestroy", ({ clientId, sessionId }) => {
+  console.log("sessionDestroy", clientId, sessionId);
 });
 
 app.use(async (ctx, next) => {
@@ -115,8 +115,8 @@ Properties:
 - `bridge.store` is the active store instance
 
 Events:
-- `sessionStart` payload: `{ clientId, sessionId }`
-- `sessionEnd` payload: `{ clientId, sessionId }`
+- `sessionSet` payload: `{ clientId, sessionId, isNew, isInit }`
+- `sessionDestroy` payload: `{ clientId, sessionId }`
 
 Runtime additions:
 - HTTP context: `ctx.clientId`, `ctx.sessionId`
@@ -203,7 +203,10 @@ Custom store is valid if it implements:
 Sync and async implementations are both supported.
 
 Important integration rule:
-- your store must emit `destroy` whenever a session is removed, otherwise bridge mapping can get stale
+- your store must implement `on(eventName, callback)` and emit events with this signature:
+- `on("set", (store, sessionId, isNew = false) => {})`
+- `on("destroy", (store, sessionId) => {})`
+- `destroy` must be emitted whenever a session is removed, otherwise bridge mapping can get stale
 
 ## Behavior and limitations
 

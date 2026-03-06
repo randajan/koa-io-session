@@ -1,3 +1,5 @@
+export const _errPrefix = "[koa-io-session]";
+
 export const ms = {
     s:(v=1)=>v*1000,
     m:(v=1)=>ms.s(v*60),
@@ -9,10 +11,11 @@ export const ms = {
 }
 
 export const _customOptKeys = new Set([
-    "store",
     "autoCleanup",
     "autoCleanupMs",
     "clientKey",
     "clientMaxAge",
     "clientAlwaysRoll"
 ]);
+
+export const _privs = new WeakMap();

@@ -1,13 +1,15 @@
-import { info } from "@randajan/simple-lib/node";
+import { info, log } from "@randajan/simple-lib/node";
 import Koa from "koa";
 import { createServer as createHttpServer } from "http";
 import { Server as SocketServer } from "socket.io";
-import { bridgeSession } from "../../../src/index.js";
+import { bridgeSession, FileStore } from "../../../dist/esm/index.mjs";
 
 
 const port = info.port + 1;
 
 const app = new Koa();
+app.keys = ["koa-io-session-demo-key-1","koa-io-session-demo-key-2"];
+
 const http = createHttpServer(app.callback());
 const io = new SocketServer(http, {
     cors: {
@@ -19,16 +21,16 @@ const io = new SocketServer(http, {
 
 const bridge = bridgeSession(app, io, {
     key: "koa.io.demo.sid",
+    store:new FileStore({fileName:"sessionsTest"}),
     signed: true,
-    maxAge: 1000 * 10,
+    maxAge: 1000 * 60,
     sameSite: "lax",
     secure: false,
     httpOnly: true
 });
 
-bridge.on("sessionStart", opt=>{ console.log("sessionStart", opt, "\n"); })
-bridge.on("sessionEnd", opt=>{ console.log("sessionEnd", opt, "\n"); })
-
+bridge.on("sessionDestroy", opt=>{ log.red("sessionDestroy", opt.sessionId, "\n"); });
+bridge.on("sessionSet", opt=>{ log.blue("sessionSet", opt.isNew, opt.sessionId, "\n"); });
 
 const readSession = (session = {}) => ({
     user: session.user ?? "guest",

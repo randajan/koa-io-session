@@ -1,6 +1,7 @@
-import { SessionStore } from "./class/SessionStore.js";
 import { _customOptKeys, ms } from "./const.js";
-import { generateUid, valid, validRange, validInterval, validObject, validStore } from "./tools.js";
+import { generateUid, valid, validRange, validInterval, validObject } from "./tools.js";
+import { SessionStore } from "./class/SessionStore.js";
+import { LiveStore } from "./stores/LiveStore.js";
 
 const pickKoaOpt = (rawOpt) => {
     const koaOpt = {}
@@ -12,7 +13,8 @@ const pickKoaOpt = (rawOpt) => {
     koaOpt.key = valid("string", koaOpt.key, false, "key") ?? generateUid(12);
     koaOpt.maxAge = validRange(ms.s(), ms.y(), koaOpt.maxAge, false, "maxAge") ?? ms.M();
     koaOpt.signed = valid("boolean", koaOpt.signed, false, "signed") ?? true;
-    koaOpt.store = validStore(rawOpt.store || new SessionStore(rawOpt));
+
+    koaOpt.store = new SessionStore(koaOpt.store ?? new LiveStore(), rawOpt);
 
     return koaOpt;
 };

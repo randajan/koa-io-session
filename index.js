@@ -13,7 +13,7 @@ slib(
             ".js": "jsx"
         },
         lib: {
-
+            entries:["index.js", "stores/FileStore.js"]
         },
         demo: {
             dir: isServer ? "demo/server" : "demo/client",
