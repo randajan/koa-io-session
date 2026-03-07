@@ -27,7 +27,7 @@ export class Bridge {
         return true;
     }
    
-    getByCid(cid) {return this.c2s.get(cid); }
+    getByCid(cid) { return this.c2s.get(cid); }
     getBySid(sid) { return this.s2c.get(sid); }
 
     deleteBySid(sid, skipIf) {

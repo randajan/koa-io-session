@@ -10,6 +10,7 @@ import { formatOptions } from "../formatOptions.js";
 import { Bridge } from "./Bridge.js";
 import { _errPrefix, _privs } from "../const.js";
 import { TempMap } from "./TempMap.js";
+import { StoreGateway } from "./StoreGateway.js";
 
 
 export class SessionBridge extends EventEmitter {
@@ -19,11 +20,11 @@ export class SessionBridge extends EventEmitter {
 
         if (!app.keys) { app.keys = Array(6).fill().map(() => generateUid(12)); }
 
-        const o = formatOptions(opt);
-        const { store } = o.koaOpt;
+        const { koaOpt, clientOpt, clientAlwaysRoll } = formatOptions(opt);
+        const _p = {};
 
         const tmp = new TempMap(5000);
-        const brg = new Bridge({
+        const brg = _p.brg = new Bridge({
             onSet:(clientId, sessionId)=>{
                 const isNew = !!tmp.get(sessionId, true);
                 this.emit("sessionSet", { clientId, sessionId, isNew, isInit:true });
@@ -31,13 +32,32 @@ export class SessionBridge extends EventEmitter {
             onDelete:(clientId, sessionId)=>this.emit("sessionDestroy", { clientId, sessionId })
         });
 
-        const cc = createClientCookie(o.clientOpt);
-        const [koaSession, sc] = createKoaSession(o.koaOpt, app, (ctx, sid)=>{
+        _p.notifySet = (sid, isNew)=>{
+            if (!sid) { return; }
+            const cid = brg.getBySid(sid);
+            if (!cid) { tmp.set(sid, isNew, false); return; }
+            this.emit("sessionSet", { clientId:cid, sessionId:sid, isNew:!!isNew, isInit:false });
+        }
+        _p.notifyDestroy = (sid)=>{ if (sid) { brg.deleteBySid(sid); } }
+        _p.notifyCleanup = (cleared)=>{ this.emit("cleanup", cleared); }
+
+        const gw = _p.gw = new StoreGateway(opt, _p);
+
+        const cc = createClientCookie(clientOpt);
+        const [koaSession, sc] = createKoaSession(app, gw, koaOpt, (ctx, sid)=>{
             const cid = cc.get(ctx);
             brg.set(cid, sid);
         });
 
-        const reviveSid = async (ctx, cid, reqSid)=>{
+        const reviveCid = ctx=>{
+            let cid = cc.get(ctx);
+            if (!cid) { cc.set(ctx, cid = generateUid(24)); }
+            else if (clientAlwaysRoll) { cc.set(ctx, cid); }
+            return cid;
+        }
+
+        const reviveSid = async (ctx, cid)=>{
+            const reqSid = sc.get(ctx);
             if (cid == null || reqSid == null) { return; } //empty cid or sid
 
             const brgSid = brg.getByCid(cid);
@@ -45,7 +65,7 @@ export class SessionBridge extends EventEmitter {
             else if (brgSid) { sc.set(ctx, brgSid); return; } //this client have different sid
 
             if (brg.getBySid(reqSid)) { return; } //sid is occupied by different client
-            if (!await store.get(reqSid)) { return; } //there is no sesssion with that sid
+            if (!await gw.get(reqSid)) { return; } //there is no sesssion with that sid
             brg.set(cid, reqSid); //attach session to this client
         }
         
@@ -53,13 +73,8 @@ export class SessionBridge extends EventEmitter {
 
         // pro HTTP jen sessionId, nic víc nepotřebujeme
         app.use(async (ctx, next) => {
-            let cid = cc.get(ctx);
-            const sid = sc.get(ctx);
-
-            if (!cid) { cc.set(ctx, cid = generateUid(24)); }
-            else if (o.clientAlwaysRoll) { cc.set(ctx, cid); }
-            
-            await reviveSid(ctx, cid, sid);
+            const cid = reviveCid(ctx);
+            await reviveSid(ctx, cid);
             
             solid(ctx, "clientId", cid);
             virtual(ctx, "sessionId", _=>brg.getByCid(cid));
@@ -73,47 +88,73 @@ export class SessionBridge extends EventEmitter {
             const ctx = app.createContext(req, res);
 
             await koaSession(ctx, async () => {});
-            const cid = cc.get(ctx);
-            const sid = sc.get(ctx);
-
-            await reviveSid(ctx, cid, sid);
+            
+            const cid = reviveCid(ctx);
+            await reviveSid(ctx, cid);
 
             solid(socket, "clientId", cid);
             virtual(socket, "sessionId", _=>brg.getByCid(cid));
             solid(socket, "withSession", async function (handler, onMissing) {
                 const onm = arguments.length > 1 ? onMissing : new Error(`${_errPrefix} Session is missing for this socket.`);
-                return applySessionHandler(socket, handler, store, onm);
+                return applySessionHandler(socket, handler, gw, onm);
             }, false);
 
             await next();
         });
 
-        store.on("destroy", (_store, sid)=>{
-            if (!sid) { return; }
-            brg.deleteBySid(sid);
-        });
-
-        store.on("set", (_store, sid, isNew)=>{
-            if (!sid) { return; }
-            const cid = brg.getBySid(sid);
-            if (!cid) { tmp.set(sid, isNew, false); return; }
-            if (isNew) { console.warn(`${_errPrefix} Invariant broken: store emitted set(isNew=true) for already bound sid=${sid}, cid=${cid}`); }
-            this.emit("sessionSet", { clientId:cid, sessionId:sid, isNew:!!isNew, isInit:false });
-        });
-
-        solid(this, "store", store);
-
-        _privs.set(this, brg);
+        _privs.set(this, _p);
     }
 
-    getSessionId(clientId) {
-        return _privs.get(this).getByCid(clientId);
+    async getById(sessionId) {
+        const { gw, brg } = _privs.get(this);
+        const cid = brg.getBySid(sessionId);
+        if (cid) { return gw.get(sessionId); }
     }
 
-    getClientId(sessionId) {
-        return _privs.get(this).getBySid(sessionId);
+    async destroyById(sessionId) {
+        const { gw, brg } = _privs.get(this);
+        const cid = brg.getBySid(sessionId);
+        if (cid) { return gw.destroy(sessionId); }
+        return false;
     }
 
+    async setById(sessionId, session, maxAge) {
+        const { gw, brg } = _privs.get(this);
+        const cid = brg.getBySid(sessionId);
+        if (cid) { return gw.set(sessionId, session, maxAge); } 
+        throw new Error(`${_errPrefix} Creating session via setById() is prohibited. sessionId='${sessionId}'.`);
+    }
+    
 
+    async getByClientId(clientId) {
+        const { gw, brg } = _privs.get(this);
+        const sid = brg.getByCid(clientId);
+        if (sid) { return gw.get(sid); }
+    }
+
+    async destroyByClientId(clientId) {
+        const { gw, brg } = _privs.get(this);
+        const sid = brg.getByCid(clientId);
+        if (sid) { return gw.destroy(sid); }
+        return false;
+    }
+    
+    async setByClientId(clientId, session, maxAge) {
+        const { gw, brg } = _privs.get(this);
+        const sid = brg.getByCid(clientId);
+        if (sid) { return gw.set(sid, session, maxAge); }
+        throw new Error(`${_errPrefix} Creating session via setByClientId() is prohibited. clientId='${clientId}'.`);
+    }
+
+    getSessionId(clientId) { return _privs.get(this).brg.getByCid(clientId); }
+    getClientId(sessionId) { return _privs.get(this).brg.getBySid(sessionId); }
+
+    async cleanup() { return _privs.get(this).gw.cleanup(); }
+    startAutoCleanup(interval) { return _privs.get(this).gw.startAutoCleanup(interval); }
+    stopAutoCleanup() { return _privs.get(this).gw.stopAutoCleanup(); }
+
+    notifyStoreSet(sessionId, isNew) { return _privs.get(this).notifySet(sessionId, isNew); }
+    notifyStoreDestroy(sessionId) { return _privs.get(this).notifyDestroy(sessionId); }
+    notifyStoreCleanup(clearedCount) { return _privs.get(this).notifyCleanup(clearedCount); }
 }
 

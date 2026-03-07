@@ -10,6 +10,10 @@
     ".": {
       "import": "./dist/esm/index.mjs",
       "require": "./dist/cjs/index.cjs"
+    },
+    "./fdb": {
+      "import": "./dist/esm/stores/FileStore.mjs",
+      "require": "./dist/cjs/stores/FileStore.cjs"
     }
   },
   "license": "MIT",

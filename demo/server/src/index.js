@@ -2,7 +2,8 @@ import { info, log } from "@randajan/simple-lib/node";
 import Koa from "koa";
 import { createServer as createHttpServer } from "http";
 import { Server as SocketServer } from "socket.io";
-import { bridgeSession, FileStore } from "../../../dist/esm/index.mjs";
+import { bridgeSession } from "../../../dist/esm/index.mjs";
+import { FileStore } from "../../../dist/esm/stores/FileStore.mjs";
 
 
 const port = info.port + 1;
@@ -21,6 +22,7 @@ const io = new SocketServer(http, {
 
 const bridge = bridgeSession(app, io, {
     key: "koa.io.demo.sid",
+    autoCleanup:true,
     store:new FileStore({fileName:"sessionsTest"}),
     signed: true,
     maxAge: 1000 * 60,

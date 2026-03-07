@@ -11,6 +11,7 @@ export const ms = {
 }
 
 export const _customOptKeys = new Set([
+    "store",
     "autoCleanup",
     "autoCleanupMs",
     "clientKey",

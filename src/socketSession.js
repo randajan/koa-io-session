@@ -1,39 +1,8 @@
 import { solids } from "@randajan/props";
-import { is, validObject } from "./tools.js";
+import { is, valid } from "./tools.js";
 import { _errPrefix } from "./const.js";
 
-
 const sidLocks = new Map();
-
-const createSessionCtx = (sessionId, session, socket) =>solids({ session }, { sessionId, socket });
-
-const createSessionHash = (session) => {
-    try { return JSON.stringify(session ?? null); }
-    catch { return null; }
-};
-
-const isSessionHashChanged = (originalHash, session) => {
-    const nextHash = createSessionHash(session);
-    if (originalHash == null || nextHash == null) { return true; }
-    return originalHash !== nextHash;
-};
-
-const withLock = async (task, socket, ...args) => {
-    const sid = socket.sessionId;
-    const previous = sidLocks.get(sid);
-    let releaseCurrent;
-    const current = new Promise((resolve) => { releaseCurrent = resolve; });
-    sidLocks.set(sid, current);
-
-    if (previous) { await previous; }
-
-    try {
-        return await task(socket, ...args);
-    } finally {
-        releaseCurrent();
-        if (sidLocks.get(sid) === current) { sidLocks.delete(sid); }
-    }
-};
 
 const applyOnMissing = (onMissing)=>{
     if (onMissing instanceof Error) { throw onMissing; }
@@ -41,39 +10,47 @@ const applyOnMissing = (onMissing)=>{
     return onMissing;
 }
 
-const runSessionHandler = async (socket, handler, store, onMissing) => {
-    const sid = socket.sessionId;
+const runSessionHandler = async (sid, socket, handler, gw, onMissing) => {
+    const session = await gw.get(sid);
+    if (!session) { return applyOnMissing(onMissing); }
 
-    const current = await store.get(sid);
-
-    if (!current) { return applyOnMissing(onMissing); }
-
-    const session = current;
-    const sessionCtx = createSessionCtx(sid, session, socket);
-
-    const originalHash = createSessionHash(sessionCtx.session);
+    const sessionCtx = solids({ session }, { sessionId:sid, socket });
     const result = await handler(sessionCtx, socket);
 
-    if (sessionCtx.session == null) {
-        await store.destroy(sid);
-        return result;
-    }
-
-    sessionCtx.session = validObject(sessionCtx.session, false, "session");
-
-    if (isSessionHashChanged(originalHash, sessionCtx.session)) {
-        await store.set(sid, sessionCtx.session);
-    }
+    if (sid === socket.sessionId) { await gw.set(sid, sessionCtx.session); }
 
     return result;
 };
 
-export const applySessionHandler = async (socket, handler, store, onMissing) => {
-
-    if (typeof handler !== "function") {
-        throw new TypeError(`${_errPrefix} socket.withSession(handler) expects 'handler' to be a function.`);
+const createLock = (sid)=>{
+    let _release;
+    const previous = sidLocks.get(sid);
+    const current = new Promise((resolve) => { _release = resolve; });
+    sidLocks.set(sid, current);
+    const release = ()=>{
+        _release();
+        if (sidLocks.get(sid) === current) { sidLocks.delete(sid); }
     }
-    if (!socket.sessionId) { return applyOnMissing(onMissing); }
+    return [ previous, release ];
+}
 
-    return withLock(runSessionHandler, socket, handler, store, onMissing);
+export const applySessionHandler = async (socket, handler, gw, onMissing) => {
+
+    valid("function", handler, true, "handler");
+
+    for (let i=0; i<5; i++) {
+        const sid = socket.sessionId;
+        if (!sid) { return applyOnMissing(onMissing); }
+
+        const [ previous, release ] = createLock(sid);
+
+        if (previous) { await previous; }
+        if (previous && sid !== socket.sessionId) { release(); continue; } 
+
+        try { return await runSessionHandler(sid, socket, handler, gw, onMissing); }
+        finally { release(); }
+    }
+
+    throw new Error(`${_errPrefix} socket.sessionId changed during withSession execution.`);
+
 };

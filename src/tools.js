@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { _errPrefix } from "./const";
+import { _errPrefix } from "./const.js";
 
 export const generateUid = (len = 16) => crypto.randomBytes(len).toString("base64url").slice(0, len);
 
@@ -16,7 +16,7 @@ export const valid = (type, any, req=false, msg="argument")=>{
     throw new TypeError(_err(`Invalid '${msg}'. Expected type '${type}', received '${_typeOf(any)}'.`));
 }
 
-export const validRange = (min, max, any, req=false, msg="argument")=>{
+export const validRange = (any, min, max, req=false, msg="argument")=>{
     const num = valid("number", any, req, msg);
     if (num == null) { return; }
     if (num < min || num > max) {
@@ -26,7 +26,7 @@ export const validRange = (min, max, any, req=false, msg="argument")=>{
 }
 
 export const validInterval = (any, req=false, msg="argument")=>{
-    return validRange(10, 2_147_483_647, any, req, msg);
+    return validRange(any, 10, 2_147_483_647, req, msg);
 }
 
 export const validObject = (any, req=false, msg="argument")=>{
@@ -37,8 +37,9 @@ export const validObject = (any, req=false, msg="argument")=>{
 }
 
 
-export const validStore = (store) => {
-    validObject(store, true, "store");
+export const validStore = (store, req=false) => {
+    store = validObject(store, req, "store");
+    if (!store) { return; }
 
     const missing = [];
     if (!is("function", store.get)) { missing.push("get()"); }

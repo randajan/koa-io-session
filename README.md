@@ -3,18 +3,24 @@
 [![NPM](https://img.shields.io/npm/v/@randajan/koa-io-session.svg)](https://www.npmjs.com/package/@randajan/koa-io-session)
 [![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
 
-Bridge between `koa-session` and `socket.io` with one shared session store.
+Bridge between `koa-session` and `socket.io` with one shared session flow.
 
-## Why this library
+## Why
 
-It keeps HTTP and WebSocket session handling in sync while staying close to native `koa-session` behavior.
+This library keeps HTTP and WebSocket session work synchronized while preserving native `koa-session` behavior.
 
 You get:
-- standard `ctx.session` in HTTP handlers
-- `ctx.clientId` and `socket.clientId` for early client tracking
-- `ctx.sessionId` and `socket.sessionId` resolved by bridge mapping
-- `socket.withSession(handler, onMissing?)` for strict or optional WS session handling
-- bridge-level events `sessionSet` and `sessionDestroy`
+- standard `ctx.session` in HTTP
+- `ctx.clientId` and `socket.clientId`
+- `ctx.sessionId` and `socket.sessionId` resolved through bridge mapping
+- `socket.withSession(handler, onMissing?)` helper
+- bridge events: `sessionSet`, `sessionDestroy`, `cleanup`
+
+## Architecture
+
+Public API is `SessionBridge`.
+
+Internally, bridge uses a private store layer for TTL/event consistency over your backend `store` (`LiveStore` / `FileStore` / custom).
 
 ## Install
 
@@ -22,7 +28,13 @@ You get:
 npm i @randajan/koa-io-session
 ```
 
-## Quick start
+For persistent file store:
+
+```bash
+npm i @randajan/file-db
+```
+
+## Quick Start
 
 ```js
 import Koa from "koa";
@@ -31,6 +43,10 @@ import { Server } from "socket.io";
 import bridgeSession from "@randajan/koa-io-session";
 
 const app = new Koa();
+
+// Keep keys stable in production (important for signed cookies after restart)
+app.keys = ["your-stable-key-1", "your-stable-key-2"];
+
 const http = createServer(app.callback());
 const io = new Server(http, {
   cors: { origin: true, credentials: true }
@@ -39,18 +55,22 @@ const io = new Server(http, {
 const bridge = bridgeSession(app, io, {
   key: "app.sid",
   signed: true,
-  maxAge: 24 * 60 * 60 * 1000,
+  maxAge: 1000 * 60 * 60 * 24,
   sameSite: "lax",
   httpOnly: true,
   secure: false
 });
 
 bridge.on("sessionSet", ({ clientId, sessionId, isNew, isInit }) => {
-  console.log("sessionSet", clientId, sessionId, { isNew, isInit });
+  console.log("sessionSet", { clientId, sessionId, isNew, isInit });
 });
 
 bridge.on("sessionDestroy", ({ clientId, sessionId }) => {
-  console.log("sessionDestroy", clientId, sessionId);
+  console.log("sessionDestroy", { clientId, sessionId });
+});
+
+bridge.on("cleanup", (cleared) => {
+  console.log("cleanup", cleared);
 });
 
 app.use(async (ctx, next) => {
@@ -68,7 +88,6 @@ app.use(async (ctx, next) => {
 
   ctx.body = {
     ok: true,
-    from: "http",
     clientId: ctx.clientId,
     sessionId: ctx.sessionId,
     session: ctx.session
@@ -77,22 +96,13 @@ app.use(async (ctx, next) => {
 
 io.on("connection", (socket) => {
   socket.on("session:get", async (ack) => {
-    try {
-      const payload = await socket.withSession(async (sessionCtx) => {
-        return {
-          ok: true,
-          from: "ws:get",
-          clientId: socket.clientId,
-          sessionId: sessionCtx.sessionId,
-          session: sessionCtx.session
-        };
-      });
-      if (typeof ack === "function") { ack(payload); }
-    } catch (error) {
-      if (typeof ack === "function") {
-        ack({ ok: false, error: error.message });
-      }
-    }
+    const payload = await socket.withSession((sessionCtx) => ({
+      ok: true,
+      sessionId: sessionCtx.sessionId,
+      session: sessionCtx.session
+    }), { ok: false, error: "missing-session" });
+
+    if (typeof ack === "function") { ack(payload); }
   });
 });
 
@@ -105,132 +115,173 @@ http.listen(3000);
 
 Creates and returns `SessionBridge`.
 
-Default export is `bridgeSession`.
-
 ### `SessionBridge`
 
-`SessionBridge` extends Node.js `EventEmitter`.
-
-Properties:
-- `bridge.store` is the active store instance
+Extends Node.js `EventEmitter`.
 
 Events:
-- `sessionSet` payload: `{ clientId, sessionId, isNew, isInit }`
-- `sessionDestroy` payload: `{ clientId, sessionId }`
+- `sessionSet`: `{ clientId, sessionId, isNew, isInit }`
+- `sessionDestroy`: `{ clientId, sessionId }`
+- `cleanup`: `clearedCount` (number of expired sessions removed)
+
+`sessionSet` flags:
+- `isNew`: backend store reported creation of a new persisted session record (`sid` had no previous state)
+- `isInit`: bridge just initialized/attached mapping in current process lifecycle (`clientId <-> sessionId`)
+- typical combinations:
+- `isNew: true`, `isInit: true` -> newly created session was attached now
+- `isNew: false`, `isInit: true` -> existing session was attached now (for example after process restart)
+- `isNew: false`, `isInit: false` -> already attached session was updated
 
 Runtime additions:
 - HTTP context: `ctx.clientId`, `ctx.sessionId`
-- Socket: `socket.clientId`, `socket.sessionId`, `socket.withSession(handler, onMissing?)`
+- socket: `socket.clientId`, `socket.sessionId`, `socket.withSession(handler, onMissing?)`
+
+Methods:
+- `getSessionId(clientId): string | undefined`
+- `getClientId(sessionId): string | undefined`
+- `getById(sessionId): Promise<object | undefined>`
+- `getByClientId(clientId): Promise<object | undefined>`
+- `destroyById(sessionId): Promise<boolean>`
+- `destroyByClientId(clientId): Promise<boolean>`
+- `setById(sessionId, session, maxAge?): Promise<boolean>` (cannot create missing session)
+- `setByClientId(clientId, session, maxAge?): Promise<boolean>` (cannot create missing session)
+- `cleanup(): Promise<number>`
+- `startAutoCleanup(interval?): boolean`
+- `stopAutoCleanup(): boolean`
+- `notifyStoreSet(sessionId, isNew?): void`
+- `notifyStoreDestroy(sessionId): void`
+- `notifyStoreCleanup(clearedCount): void`
+
+Missing policy:
+- `getBy*` on missing mapping: returns `undefined`
+- `destroyBy*` on missing mapping: returns `false`
+- `setBy*` on missing mapping: throws `Error` (creating via this path is prohibited)
 
 ### `socket.withSession(handler, onMissing?)`
 
-`handler` receives one object:
+`handler` receives:
 - `sessionCtx.sessionId`
 - `sessionCtx.session`
 - `sessionCtx.socket`
 
 Rules:
-- default behavior (`onMissing` not provided): throws `Error("Session missing")`
-- missing session means `socket.sessionId` is missing
-- missing session means store does not have session for current sid
+- default `onMissing` is error (`Session is missing for this socket`)
 - if `sessionCtx.session = null`, session is destroyed
 - if session changed, store `set` is called
-- calls for same `sessionId` are serialized
+- same-session calls are serialized by `sessionId`
 
 `onMissing` behavior:
-- if `onMissing` is an `Error`, it is thrown
-- if `onMissing` is a function, its return value is used
-- otherwise, `onMissing` value is returned as-is
-
-Examples:
-- strict (default): `await socket.withSession(handler)`
-- silent undefined on missing: `await socket.withSession(handler, undefined)`
-- custom fallback value: `await socket.withSession(handler, { ok: false })`
-- custom fallback callback: `await socket.withSession(handler, () => ({ ok: false }))`
+- `Error` -> throw
+- `function` -> call and return its value
+- any other value -> return as fallback
 
 ## Options
 
-`opt` is mostly forwarded to `koa-session`, except internal bridge keys:
+`opt` is mostly forwarded to `koa-session`, with bridge-specific keys:
 
-- `store`
-- `autoCleanup`
-- `autoCleanupMs`
-- `clientKey`
-- `clientMaxAge`
-- `clientAlwaysRoll`
+- `store` (backend store implementation)
+- `maxAge` (session TTL used by StoreGateway and koa cookie)
+- `autoCleanup` (default `false`)
+- `autoCleanupMs` (used only when `autoCleanup === true`)
+- `clientKey` (default `${key}.cid`)
+- `clientMaxAge` (default `1 year`)
+- `clientAlwaysRoll` (default `true`)
 
-Defaults:
-- `key`: random `generateUid(12)`
-- `maxAge`: `30 days`
+Default behavior:
+- `key`: random generated when missing
 - `signed`: `true`
-- `store`: `new SessionStore(opt)`
-- `clientKey`: `${key}.cid`
-- `clientMaxAge`: `1 year`
-- `clientAlwaysRoll`: `true`
-- `app.keys`: auto-generated if missing
+- `store`: `new LiveStore()`
+- `app.keys`: auto-generated if missing (recommended to set manually in production)
+- `autoCleanupMs`: when omitted and `autoCleanup` is enabled, interval is computed as `maxAge / 4`, clamped to `<1 minute, 1 day>`
 
-Notes:
-- set stable `app.keys` in production
-- keep cookie settings consistent with your deployment (`sameSite`, `secure`, domain/path)
+## Store Contract
 
-## `SessionStore`
+Backend `store` must implement:
+- `get(sid)` -> returns stored state or `undefined`
+- `set(sid, state)` -> returns boolean (or truthy)
+- `destroy(sid)` -> returns boolean
 
-Default in-memory store with TTL.
+Optional:
+- `list()` -> required for cleanup features
+- `optimize(clearedCount)` -> called after cleanup if present
 
-Constructor:
-- `new SessionStore({ maxAge, autoCleanup, autoCleanupMs })`
+Stored state format expected by gateway:
+- `{ session, expiresAt, ttl }` where `session` is JSON string (serialized session object)
 
-Methods:
-- `get(sid)`
-- `set(sid, session, maxAge?)`
-- `destroy(sid)` (also used by `delete`)
-- `cleanup()`
-- `on(eventName, callback)`
+Both sync and async store methods are supported.
 
-Events emitted by store:
-- `set`
-- `destroy`
-- `cleanup`
+## Consistency Rule (Important)
 
-## Custom store contract
+After bridge initialization, direct mutation of `opt.store` is unsupported by default.
 
-Custom store is valid if it implements:
-- `get(sid)`
-- `set(sid, session, maxAge?)`
-- `destroy(sid)`
-- `on(eventName, callback)`
+Why:
+- it bypasses gateway/bridge consistency flow
+- it can break `clientId <-> sessionId` synchronization
+- it can cause missing or misleading bridge events
 
-Sync and async implementations are both supported.
+Use `SessionBridge` methods (`setBy*`, `destroyBy*`, `cleanup`) for controlled mutations.
 
-Important integration rule:
-- your store must implement `on(eventName, callback)` and emit events with this signature:
-- `on("set", (store, sessionId, isNew = false) => {})`
-- `on("destroy", (store, sessionId) => {})`
-- `destroy` must be emitted whenever a session is removed, otherwise bridge mapping can get stale
+Advanced bypass (you take full responsibility):
+- if you intentionally mutate backend store directly, call matching notify method right after each mutation:
+- `notifyStoreSet(sessionId, isNew?)`
+- `notifyStoreDestroy(sessionId)`
+- `notifyStoreCleanup(clearedCount)`
 
-## Behavior and limitations
+## Built-in Stores
+
+### `LiveStore`
+
+In-memory backend store.
+
+```js
+import bridgeSession, { LiveStore } from "@randajan/koa-io-session";
+
+const bridge = bridgeSession(app, io, {
+  store: new LiveStore()
+});
+```
+
+### `FileStore` (persistent, `@randajan/file-db`)
+
+```js
+import { FileStore } from "@randajan/koa-io-session/fdb";
+
+const bridge = bridgeSession(app, io, {
+  store: new FileStore({ fileName: "sessions" })
+});
+```
+
+## Behavior and Limitations
 
 1. Session creation is HTTP-first.
-- WebSocket handler does not create missing sessions.
+- WebSocket path does not create missing sessions by itself.
 
-2. Bridge mapping is in-memory.
-- After process restart, mapping is rebuilt from incoming cookies plus store state.
+2. Mapping (`clientId <-> sessionId`) is in-memory.
+- After process restart, mapping is rebuilt from incoming cookies and existing store state.
 
-3. Signed cookies depend on stable keys.
-- If `app.keys` change, previously signed cookies become invalid.
+3. Signed cookies depend on stable `app.keys`.
+- Changing keys invalidates previous signed cookies.
 
-4. Change detection in WS uses `JSON.stringify`.
-- Non-serializable or cyclic data are not recommended in session payloads.
+4. WS change detection uses `JSON.stringify`.
+- Non-serializable/cyclic payloads are not recommended in session data.
 
 ## Exports
+
+Main entry:
 
 ```js
 import bridgeSession, {
   bridgeSession,
   SessionBridge,
-  SessionStore,
+  LiveStore,
   generateUid
 } from "@randajan/koa-io-session";
+```
+
+Persistent file store entry:
+
+```js
+import { FileStore } from "@randajan/koa-io-session/fdb";
 ```
 
 ## License
