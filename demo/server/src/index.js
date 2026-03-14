@@ -9,7 +9,6 @@ import { FileStore } from "../../../dist/esm/stores/FileStore.mjs";
 const port = info.port + 1;
 
 const app = new Koa();
-app.keys = ["koa-io-session-demo-key-1","koa-io-session-demo-key-2"];
 
 const http = createHttpServer(app.callback());
 const io = new SocketServer(http, {
@@ -21,6 +20,7 @@ const io = new SocketServer(http, {
 });
 
 const bridge = bridgeSession(app, io, {
+    "appKeys": ["L8XKOBqk6dXyOvfyyN7BumBGnAxsjm_O","hAcB-PPRcAI1qklgiy9qwvEtNSLPgOe3"],
     key: "koa.io.demo.sid",
     autoCleanup:true,
     store:new FileStore({fileName:"sessionsTest"}),

@@ -179,20 +179,28 @@ Rules:
 
 `opt` is mostly forwarded to `koa-session`, with bridge-specific keys:
 
+- `appKeys` (optional array used to initialize `app.keys`)
+- `allowRndAppKeys` (default `false`; suppress runtime warning when keys are generated)
 - `store` (backend store implementation)
 - `maxAge` (session TTL used by StoreGateway and koa cookie)
 - `autoCleanup` (default `false`)
 - `autoCleanupMs` (used only when `autoCleanup === true`)
-- `clientKey` (default `${key}.cid`)
+- `clientKey` (default `"cid"`)
 - `clientMaxAge` (default `1 year`)
 - `clientAlwaysRoll` (default `true`)
 
 Default behavior:
-- `key`: random generated when missing
+- `key`: `"sid"` when missing
 - `signed`: `true`
 - `store`: `new LiveStore()`
-- `app.keys`: auto-generated if missing (recommended to set manually in production)
+- `app.keys`: if missing, bridge generates 2 runtime keys (length 32) and logs warning
 - `autoCleanupMs`: when omitted and `autoCleanup` is enabled, interval is computed as `maxAge / 4`, clamped to `<1 minute, 1 day>`
+
+`app.keys` resolution:
+- if `app.keys` already exists and `appKeys` is not provided: existing `app.keys` is used
+- if `app.keys` already exists and `appKeys` is provided: throws error
+- if `app.keys` is missing and `appKeys` is provided: `app.keys = appKeys`
+- if both are missing: bridge generates runtime keys; warning is shown unless `allowRndAppKeys === true`
 
 ## Store Contract
 

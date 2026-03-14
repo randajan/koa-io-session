@@ -3,7 +3,7 @@ import { ServerResponse } from "http";
 import { solid, virtual } from "@randajan/props";
 
 import { generateUid } from "../tools.js";
-import { createKoaSession, createClientCookie } from "../httpSession.js";
+import { createKoaSession, createClientCookie, ensureAppKeys } from "../httpSession.js";
 import { applySessionHandler } from "../socketSession.js";
 
 import { formatOptions } from "../formatOptions.js";
@@ -18,10 +18,10 @@ export class SessionBridge extends EventEmitter {
     constructor(app, io, opt = {}) {
         super();
 
-        if (!app.keys) { app.keys = Array(6).fill().map(() => generateUid(12)); }
-
-        const { koaOpt, clientOpt, clientAlwaysRoll } = formatOptions(opt);
+        const { appKeys, allowRndAppKeys, koaOpt, clientOpt, clientAlwaysRoll } = formatOptions(opt);
         const _p = {};
+
+        ensureAppKeys(app, appKeys, allowRndAppKeys);
 
         const tmp = new TempMap(5000);
         const brg = _p.brg = new Bridge({

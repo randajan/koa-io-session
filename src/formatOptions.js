@@ -1,5 +1,5 @@
 import { _customOptKeys, ms } from "./const.js";
-import { generateUid, valid, validInterval, validObject } from "./tools.js";
+import { generateUid, valid, validArray, validInterval, validObject } from "./tools.js";
 
 const pickKoaOpt = (rawOpt) => {
     const koaOpt = {}
@@ -8,7 +8,7 @@ const pickKoaOpt = (rawOpt) => {
         koaOpt[key] = rawOpt[key];
     }
 
-    koaOpt.key = valid("string", koaOpt.key, false, "key") ?? generateUid(12);
+    koaOpt.key = valid("string", koaOpt.key, false, "key") ?? "sid";
     koaOpt.signed = valid("boolean", koaOpt.signed, false, "signed") ?? true;
 
     return koaOpt;
@@ -21,18 +21,22 @@ const pickKoaOpt = (rawOpt) => {
 export const formatOptions = (opt = {}) => {
     opt = validObject(opt, true, "options");
 
+    const appKeys = validArray(opt.appKeys, false, "appKeys");
+    const allowRndAppKeys = valid("boolean", opt.allowRndAppKeys, false, "allowRnddAppKeys") ?? false;
+
     const koaOpt = pickKoaOpt(opt);
     
-    const clientKey = valid("string", opt.clientKey) ?? `${koaOpt.key}.cid`;
+    const clientKey = valid("string", opt.clientKey) ?? "cid";
     const clientMaxAge = validInterval(opt.clientMaxAge, false, "clientMaxAge") ?? ms.y();
     const clientAlwaysRoll = valid("boolean", opt.clientAlwaysRoll, false, "clientAlwaysRoll") ?? true;
 
     const clientOpt = { ...koaOpt, key:clientKey, maxAge:clientMaxAge }
 
     return {
+        appKeys,
+        allowRndAppKeys,
         koaOpt,
         clientOpt,
         clientAlwaysRoll,
     };
 };
-

@@ -29,6 +29,13 @@ export const validInterval = (any, req=false, msg="argument")=>{
     return validRange(any, 10, 2_147_483_647, req, msg);
 }
 
+export const validArray = (any, req=false, msg="argument")=>{
+    const obj = valid("object", any, req, msg);
+    if (obj == null) { return; }
+    if (Array.isArray(obj)) { return obj; }
+    throw new TypeError(_err(`Invalid '${msg}'. Expected plain array, received plain object.`));
+}
+
 export const validObject = (any, req=false, msg="argument")=>{
     const obj = valid("object", any, req, msg);
     if (obj == null) { return; }
