@@ -13,6 +13,7 @@ You get:
 - standard `ctx.session` in HTTP
 - `ctx.clientId` and `socket.clientId`
 - `ctx.sessionId` and `socket.sessionId` resolved through bridge mapping
+- `socket.ctx` (Koa context created from socket handshake request)
 - `socket.withSession(handler, onMissing?)` helper
 - bridge events: `sessionSet`, `sessionDestroy`, `cleanup`
 
@@ -134,7 +135,8 @@ Events:
 
 Runtime additions:
 - HTTP context: `ctx.clientId`, `ctx.sessionId`
-- socket: `socket.clientId`, `socket.sessionId`, `socket.withSession(handler, onMissing?)`
+- socket: `socket.ctx`, `socket.clientId`, `socket.sessionId`, `socket.withSession(handler, onMissing?)`
+- `socket.ctx` is created during socket initialization from handshake request/response
 
 Methods:
 - `getSessionId(clientId): string | undefined`

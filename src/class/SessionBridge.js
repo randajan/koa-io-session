@@ -92,6 +92,7 @@ export class SessionBridge extends EventEmitter {
             const cid = reviveCid(ctx);
             await reviveSid(ctx, cid);
 
+            solid(socket, "ctx", ctx);
             solid(socket, "clientId", cid);
             virtual(socket, "sessionId", _=>brg.getByCid(cid));
             solid(socket, "withSession", async function (handler, onMissing) {
