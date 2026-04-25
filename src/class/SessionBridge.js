@@ -49,19 +49,21 @@ export class SessionBridge extends EventEmitter {
             brg.set(cid, sid);
         });
 
-        const reviveCid = ctx=>{
+        const reviveCid = (ctx, allowSet=false)=>{
             let cid = cc.get(ctx);
+            if (!allowSet) { return cid; }
             if (!cid) { cc.set(ctx, cid = generateUid(24)); }
             else if (clientAlwaysRoll) { cc.set(ctx, cid); }
             return cid;
         }
 
-        const reviveSid = async (ctx, cid)=>{
+        const reviveSid = async (ctx, cid, allowSet=false)=>{
             const reqSid = sc.get(ctx);
             if (cid == null || reqSid == null) { return; } //empty cid or sid
 
             const brgSid = brg.getByCid(cid);
             if (brgSid == reqSid) { return; } //correct sid for this client
+            else if (brgSid && !allowSet) { return; } //reqSid is obsolete but we can't set new one
             else if (brgSid) { sc.set(ctx, brgSid); return; } //this client have different sid
 
             if (brg.getBySid(reqSid)) { return; } //sid is occupied by different client
@@ -73,8 +75,8 @@ export class SessionBridge extends EventEmitter {
 
         // pro HTTP jen sessionId, nic víc nepotřebujeme
         app.use(async (ctx, next) => {
-            const cid = reviveCid(ctx);
-            await reviveSid(ctx, cid);
+            const cid = reviveCid(ctx, true);
+            await reviveSid(ctx, cid, true);
             
             solid(ctx, "clientId", cid);
             virtual(ctx, "sessionId", _=>brg.getByCid(cid));
@@ -89,8 +91,8 @@ export class SessionBridge extends EventEmitter {
 
             await koaSession(ctx, async () => {});
             
-            const cid = reviveCid(ctx);
-            await reviveSid(ctx, cid);
+            const cid = reviveCid(ctx, false);
+            await reviveSid(ctx, cid, false);
 
             solid(socket, "ctx", ctx);
             solid(socket, "clientId", cid);
